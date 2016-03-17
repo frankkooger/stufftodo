@@ -1,0 +1,70 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _const.inc.dist 140 2010-09-05 21:23:57Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+// Bepaal of we op een windoze platform draaien
+//
+define('PLATFORM', preg_match("/^[c-zC-Z][:][\\\]/", __FILE__) ? 'windows' : 'linux');
+#define('PS', preg_match("/^[c-zC-Z][:][\\\]/", __FILE__) ? '\\' : '/');
+
+// Hostnaam is onderdeel van de namen van backupfiles. Hiermee kan onderscheid
+// worden gemaakt als de administratie op meerdere platforms wordt gedraaid. In
+// alle andere gevallen: laat staan op 'localhost'
+define('UNAME', php_uname('n') ?  preg_replace("/^([^.]+).*$/","$1",php_uname('n')) : 'localhost');
+
+// Voorinstelling van het pad waar de mysql binaries zijn te vinden. Op windows
+// is dat in een specifieke directory (verander die hieronder naar gelang de
+// installatie verandert) en op linux is het in de PATH settings te vinden
+// (/usr/bin) dus blijft de voorinstelling leeg.
+define('MYSQLBIN', PLATFORM == 'windows' ?  "c:\\openadmin\\mysql\\bin" : '');
+
+// Voorinstelling van het pad waar de sqlite binaries zijn te vinden. Op windows
+// is dat in een specifieke directory (verander die hieronder naar gelang de
+// installatie verandert) en op linux is het in de PATH settings te vinden
+// (/usr/bin) dus blijft de voorinstelling leeg.
+define('SQLITEBIN', PLATFORM == 'windows' ? "c:\\openadmin\\htdocs\\bin" : '');
+
+// Voorinstelling van het pad waar de firebird binaries zijn te vinden. Op windows
+// is dat in een specifieke directory (verander die hieronder naar gelang de
+// installatie verandert) en op linux is het in de PATH settings te vinden
+// (/usr/bin) dus blijft de voorinstelling leeg.
+// define('FIREBIRDBIN', PLATFORM == 'windows' ? "c:\\Program Files\\Firebird\\Firebird_2_1\\bin" : '/opt/firebird/bin');
+define('FIREBIRDBIN', PLATFORM == 'windows' ? "c:\\Program Files\\Firebird\\Firebird_2_1\\bin" : '');
+//  "c:\\openadmin\\firebird\\bin" : '';
+
+// Voorinstelling van het pad waar de postgresql binaries zijn te vinden. Op windows
+// is dat in een specifieke directory (verander die hieronder naar gelang de
+// installatie verandert) en op linux is het in de PATH settings te vinden
+// (/usr/bin) dus blijft de voorinstelling leeg.
+define('POSTGRESBIN', PLATFORM == 'windows' ? "c:\\Program Files\\PostgreSQL\\8.4\\bin" : '');
+//  "c:\\openadmin\\postgresql\\bin" : '';
+
+// TODO bepaal op een linux systeem en een firebird installatie of gebruik
+// wordt gemaakt van fbisql (Ubuntu) of isql (RedHat/CentOs)
+
+define('DIRBASE', preg_replace("/(^.+).config$/","$1",dirname(__FILE__)));
+define('DATADIR', DIRBASE.PS.'data');
+define('STRUCTDIR', DIRBASE.PS.'struct');
+define('BINDIR', DIRBASE.PS.'bin');
+define('LOGFILE', DIRBASE.PS.'logs'.PS.'logfile');
+
+/* __END__ */

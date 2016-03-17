@@ -1,0 +1,665 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _pdf.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * Creates a PDF document using TCPDF
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+require_once('_oa.lib');
+
+//require_once($config->data['dir']['base'].'/tcpdf/config/lang/eng.php');
+require_once($config->data['dir']['base'].'/tcpdf/tcpdf.php');
+
+// Extend the TCPDF class to create custom Header and Footer
+// and create some propietary methods
+//
+class MYPDF extends TCPDF {
+  var $database;
+  var $bedrijfsnaam;
+  var $onderwerp;
+  var $boekjaar;
+  var $landscape = false;
+  var $fontsize = '';
+  var $fonttype = '';
+  var $headerfontsize = '';
+  var $headerfonttype = '';
+  var $lijndikte = 0.2;
+
+  /* ************************************************
+  * @METHOD: void initialize()
+  * @RETURNS: void
+  * @SYLLABUS:
+  *   Initialiseert Headerparms, SpotColors e.a.
+  ************************************************{{{ */
+  function initialize() {
+
+    // set default header data
+    $this->SetHeaderData(PDF_HEADER_LOGO, PDF_HEADER_LOGO_WIDTH, PDF_HEADER_TITLE, PDF_HEADER_STRING);
+
+    // set header and footer fonts
+    $this->setHeaderFont(Array(PDF_FONT_NAME_MAIN, '', PDF_FONT_SIZE_MAIN));
+    $this->setFooterFont(Array(PDF_FONT_NAME_DATA, '', PDF_FONT_SIZE_DATA));
+
+    //set margins
+    /* Defaults:
+      define ('PDF_MARGIN_HEADER', 5);
+      define ('PDF_MARGIN_FOOTER', 10);
+      define ('PDF_MARGIN_TOP', 27);
+      define ('PDF_MARGIN_BOTTOM', 25);
+      define ('PDF_MARGIN_LEFT', 15);
+      define ('PDF_MARGIN_RIGHT', 15);
+    */
+    $this->SetMargins(PDF_MARGIN_LEFT, PDF_MARGIN_TOP, PDF_MARGIN_RIGHT);
+    //$this->SetMargins(PDF_MARGIN_LEFT, 20, PDF_MARGIN_RIGHT);
+    $this->SetHeaderMargin(PDF_MARGIN_HEADER);
+    $this->SetFooterMargin(PDF_MARGIN_FOOTER);
+
+    // Ingeval van landscape gelden andere waarden
+    if($this->landscape) {
+      $this->SetMargins(14, 23, 14);
+      $this->SetHeaderMargin(10);
+    }
+
+    //set auto page breaks
+    $this->SetAutoPageBreak(TRUE, PDF_MARGIN_BOTTOM);
+
+    //set image scale factor
+    $this->setImageScale(PDF_IMAGE_SCALE_RATIO); 
+
+    //set some language-dependent strings
+    $this->setLanguageArray($this->l); 
+
+    // Onderstaande instellen van de p tag in HTMLprint
+    $this->setHtmlVSpace(array("p" => array(0 => array("h" => "0.3", "n" => 1), 1 => array("h" => 1.3, "n" => 1))));
+    //
+    // Set the vertical spaces for HTML tags.
+    //
+    // The array must have the following structure (example): 
+    // $tagvs = array('h1' => array(0 => array('h' => '', 'n' => 2), 1 => array('h' => 1.3, 'n' => 1))); 
+    // The first array level contains the tag names, the second level contains 0
+    // for opening tags or 1 for closing tags, the third level contains the
+    // vertical space unit (h) and the number spaces to add (n). If the h parameter
+    // is not specified, default values are used.
+
+    // Definieer enkele steunkleuren.
+    // TODO We gebruiken niet alles; kijk wat er weg kan
+    //
+    $this->AddSpotColor('Pantone 1 C', 11, 9, 12, 0);
+    $this->AddSpotColor('Pantone 9060 C', 0, 0, 7, 0);
+    $this->AddSpotColor('Pantone 420 C', 22, 14, 22, 0);
+    $this->AddSpotColor('Pantone 422 C', 39, 24, 34, 0);
+    $this->AddSpotColor('Pantone 433 C', 34, 0, 0, 94);
+    $this->AddSpotColor('NovaSpace-Black', 50, 0, 0, 100);
+    $this->AddSpotColor('Pantone 601 C', 0, 0, 55, 0);
+    $this->AddSpotColor('Pantone 658 C', 33, 17, 1, 0);
+    $this->AddSpotColor('Pantone 659 C', 50, 20, 0, 10);
+    // Enkele eigen kleuren
+    $this->AddSpotColor('DIC 2242s', 43, 68, 54, 24);
+    $this->AddSpotColor('WHITY', 0, 1, 2, 0);
+    $this->AddSpotColor("Grijs",'20','20','20','20');
+
+    // select the spot color
+    // where tint (the second parameter) is the intensity of the color (full intensity by default).
+    // $this->SetTextSpotColor('NovaSpace-Black', 100);
+    // $this->SetDrawSpotColor('NovaSpace-Black', 100);
+
+    // zet evt ander fonttype en size
+    if($this->fonttype || $this->fontsize) $this->setFont($this->fonttype,'',$this->fontsize);
+ 
+  } // END METHOD initialize() }}}
+
+
+  /* ************************************************
+  * @METHOD: arr positie()
+  * @RETURNS: array met positie X en Y
+  * @SYLLABUS:
+  *   Geeft de huidige positie van de cursor terug als X,Y array
+  ************************************************{{{ */
+  function positie() {
+    return(array($this->GetX(), $this->GetY()));
+  } // END METHOD positie}}}
+
+  
+  /* ************************************************
+  * @METHOD: void Header()
+  * @RETURNS: void
+  * @SYLLABUS:
+  *   Stelt de paginaheader samen. De paginaheader wordt automatisch geprint bij elke
+  *   AddPage() en bij elke automatische pagina-begin.
+  ************************************************{{{ */
+  function Header() {
+    
+    // Eigenschappen
+    $this->SetFont($this->headerfonttype, "", $this->headerfontsize);
+    $this->SetFillSpotColor("DIC 2242s",'100');
+    $this->SetTextSpotColor("WHITY",'100');
+
+    // Maten voor landscape en portrait:
+    //   array(maxbreedte border, cellbreedte cel 2 en 3 in eerste rij en cel 2 in tweede rij, cellbreedte cel 1 in tweede rij);
+    $measures = $this->landscape ? array(272,90,180) : array(182,60,120);
+
+    // Teken een border rond de header
+    $p = $this->positie();
+    $this->Rect($p[0] - 1, $p[1] - 1, $measures[0], 14, 'D');
+
+    // Verdeel de topregel over 3 cellen
+    $this->Cell($measures[1], 0, " Administratie: ".$this->bedrijfsnaam, 0, 0, "L", 1);
+    $this->Cell($measures[1], 0, "dbase: ".$this->database, 0, 0, "C", 1);
+    $this->Cell($measures[1], 0, $GLOBALS['timer']->vandaag." ", 0, 1, "R", 1);
+
+    // Dan 2 velden met omschrijving en boekjaar zonder border
+    $fsize = ($this->headerfontsize) ? $this->headerfontsize + 1 : '11';
+    $this->SetFont($this->headerfonttype, 'B', $fsize);
+    $this->SetTextColor(0);
+    $this->Ln(2);
+    $this->Cell($measures[2], 0, " ".$this->onderwerp, 0, 0, "L", 0);
+    $this->Cell($measures[1], 0, "Boekjaar: ".$this->boekjaar." ", 0, 1, "R", 0);
+
+  } // END METHOD Header }}}
+
+    
+  /* ************************************************
+  * @METHOD: void Footer()
+  * @RETURNS: void
+  * @SYLLABUS:
+  *   Stelt de paginafooter samen. De paginafooter wordt automatisch geprint bij elke
+  *   AddPage() en einde pagina.
+  ************************************************{{{ */
+  function Footer() {
+    // Position at 1.5 cm from bottom
+    $this->SetY(-15);
+    // Set font
+    $this->SetFont("", "I", 8);
+    // Page number
+    $this->Cell(0, 10, "Pagina ".$this->getAliasNumPage()."/".$this->getAliasNbPages(), 0, 0, "C");
+
+  } // END METHOD Footer }}}
+
+
+  /* ************************************************
+  * @METHOD: printKop(str $title, bool $lijn)
+  * @RETURNS: void
+  * @SYLLABUS:
+  *   Print specifiek opgemaakte kopregel met onderlijn indien lijn=true
+  ************************************************{{{ */
+  function printKop($title, $lijn=true) {
+    $fsize = ($this->fontsize) ? $this->fontsize + 1 : '11';
+    $this->SetFont($this->fonttype, "B", $fsize);
+    // Line break
+    $this->Ln(6);
+    $this->Cell(0, 6, $title, 0, 1, "L");
+    if($lijn) {
+      $this->SetLineStyle(array("width"=>0.2,"color"=>array(0,64,128)));
+      $current = $this->GetY();
+      ($this->landscape) and $this->Line(15,$current,283,$current) 
+                          or $this->Line(15,$current,195,$current);
+      $this->Ln(2);
+    }
+    else {
+      $this->Ln(2);
+    }
+    $this->SetFont($this->fonttype, "", $this->fontsize);
+
+  } // END FUNCTION printKop }}}
+
+
+  /* ************************************************
+  * @METHOD: equalLine(int $posY)
+  * @RETURNS: void
+  * @SYLLABUS:
+  *   Vergelijkt de huidige positie van de pointer met de eerdere posY.
+  *   Indien posY groter is dan wordt de huidige positie op het niveau van
+  *   posY gebracht en vanaf dat punt een nieuwe regel ingevoerd. Dit is om
+  *   te voorkomen dat een label meerdere regels in beslag neemt terwijl het
+  *   itemveld maar 1 regel is. De newline wordt echter vanuit het itemveld
+  *   gegenereerd waardoor de pointer midden in het label terecht zou komen.
+  * TODO: dit moet op een andere manier worden ingevuld: meten van de benodigde
+  * ruimte die de tekst in een cel gaat nemen mbv. 
+  *   pdf->int getNumLines( string $txt, [float $w = 0])
+  ************************************************{{{ */
+  function equalLine($posY) {
+    $current = $this->GetY();
+    $this->Ln(2);
+  } // END FUNCTION equalLine }}}
+
+
+  /* ************************************************
+  * @METHOD: coloredTable()
+  * @RETURNS: void
+  * @PARAMETERS: array($header) - de beschrijvingen in de header b.v. array('nummer','datum','omschrijving','debet','credit');
+  *                               Indien een leeg array wordt meegegeven dan wordt geen header geprint.
+  *              array($data)   - array met data-arrays: array(array('','','','',''), array('','','','',''), ..);
+  *              array($widths) - array met kolombreedtes: array(15, 15, 45, 25, 25);
+  *              array($ctypes) - array met kolomtypes: array('C', 'C', 'L', 'R', 'R');
+  *              str($fontsize) - stelt de fontsize in
+  *              bool($keepopen)- indien true: print geen afsluitende regel/lijn onderaan de tabel. Hierdoor kan er nog iets 
+  *                               aan de tabel worden bijgeprint.
+  * @SYLLABUS:
+  *   Maakt een tabel met headers en datarijen. Het aantal rijen en
+  *   columntypes is variabel.
+  ************************************************{{{ */ 
+  public function coloredTable($header,$data,$widths,$ctypes,$fontsize='',$keepopen=false) {
+    // Colors, line width and bold font
+    $this->SetFillSpotColor("Pantone 658 C", 100); // Fill color voor de headerrow
+    $this->SetTextColor(0);
+    $this->SetDrawColor(0); // Zwart
+    $this->SetLineWidth(0.2);
+    $this->SetFont($this->fonttype, 'B', $this->fontsize);
+    // header
+    if(count($header) > 0) { // print header
+      for($i = 0; $i < count($header); $i++)
+        $this->Cell($widths[$i], 7, $header[$i], 1, 0, 'C', 1);
+      $this->Ln();
+    }
+    else { // print alleen een lijn
+      $length = 0;
+      foreach($widths AS $width) {
+        $length += $width;
+      }
+      $pos = $this->positie();
+      $this->Line($pos[0], $pos[1], $pos[0] + $length, $pos[1] );
+    }
+    // Color and font restoration
+    $this->SetFillColor(224, 235, 255);
+    $this->SetTextColor(0);
+    $this->SetFont($this->fonttype,'',$this->fontsize);
+    // Data
+    $fill = 0;
+    foreach($data as $row) {
+      $i=0;
+      foreach($widths AS $width) {
+        $this->Cell($width, 6, $row[$i], 'LR', 0, $ctypes[$i], $fill);
+        $i++;
+      }
+      $this->Ln();
+      $fill=!$fill;
+    }
+    if(! $keepopen) {
+      $this->Cell(array_sum($widths), 0, '', 'T');
+      $this->Ln();
+    }
+
+  } // END METHOD coloredTable }}}
+
+
+  /* ************************************************
+  * @METHOD: cTable()
+  * @RETURNS: void
+  * @PARAMETERS: array($data) - een array met (rijen) data en per rij de naam van een sjabloon 
+  *                             array(array('sjabloonnaam', array('','','','')))
+                  Array
+                  (
+                      [0] => Array
+                          (
+                              [sjabloon] => header
+                              [data] => Array
+                                  (
+                                      [0] => Nummer
+                                      [1] => Omschrijving
+                                      [2] => Debet
+                                      [3] => Credit
+                                  )
+
+                          )
+
+                      [1] => Array
+                          (
+                              [sjabloon] => regular
+                              [data] => Array
+                                  (
+                                      [0] => 2345
+                                      [1] => Inventaris
+                                      [2] => € 143.978,99
+                                      [3] => € 12,95
+                                  )
+
+                          )
+  * @SYLLABUS:
+  *   Maakt een tabel met headers en datarijen. Het aantal rijen en
+  *   columntypes is variabel. Colum-eigenschappen worden per rij gestuurd door sjablonen.
+  *   Als $data = een lege array '$pdf->cTable(array())' dan wordt een lijn geprint met de breedte van het header sjabloon (dat moet er dan wel zijn)
+  *   Als de inhoud van $data is een lege data array '$pdf->cTable(array(array)))' dan wordt een lege regel geprint
+  ************************************************{{{ */ 
+  public function cTable($data) {
+    // data is een array
+    if(! is_array($data)) 
+      return(false);
+    // Als data een lege array is, trek dan een lijn met de breedte van het header sjabloon
+    elseif(count($data) == 0) {
+      // bereken de breedte, gebaseerd op de widths van het sjabloon 'header'. Zo'n sjabloon moet er dus altijd zijn.
+      $length = array_sum($this->sjabloon['header']->widths);
+      // Trek de lijn
+      $pos = $this->positie();
+      $this->Line($pos[0], $pos[1], $pos[0] + $length, $pos[1] );
+      // En laat positie een lijndikte zakken
+      $this->SetY($pos[1] + $this->lijndikte);
+    }
+    else { // print dataregels
+
+      foreach($data AS $row) {
+
+/*
+printr($row);
+Array
+(
+    [sjabloon] => header
+    [data] => Array
+        (
+            [0] => Nummer
+            [1] => Omschrijving
+            [2] => Debet
+            [3] => Credit
+        )
+)
+Array
+(
+    [sjabloon] => regular
+    [data] => Array
+        (
+            [0] => 2345
+            [1] => Inventaris
+            [2] => € 143.978,99
+            [3] => € 12,95
+        )
+)
+*/
+
+        // als het sjabloon == pagebreak geef dan een nieuwe pagina en ga door
+        if($row['sjabloon'] == 'pagebreak') {
+          $this->addPage();
+          continue;
+        }
+
+        // scheid het sjabloon en de data en haal het sjabloon
+        $s = $this->sjabloon[$row['sjabloon']];
+        $c = (is_object($this->sjabloon[$row['sjabloon']])) // bij lege regels en lijnen is dit geen object dus eerst checken
+          ? clone $this->sjabloon[$row['sjabloon']] : $s;
+
+        // Als is_array fillcolor dan switchen we wel tussen twee kleuren maar
+        // fill is altijd aan, dus de eerste kleur is niet transparant maar de
+        // eerste arraywaarde.
+        if(isset($s->fillcolor[0]) && is_array($s->fillcolor[0])) {
+         $c->fillcolor = $s->fillcolor[$s->switchstatus];
+         $s->switchcolor = false; // als dit op true blijft staan dan treedt alsnog het 'fill' mechanisme in werking
+                                  //  en dit moet uit als we switchen met twee kleuren.
+        }
+
+        // Stel de kleur, font, etc. waarden in
+        $this->instellen($c);
+
+        // Print de velden; leidraad is het aantal elementen in widths
+/*
+void Cell( float $w, [float $h = 0], [string $txt = ''], [mixed $border = 0], [int $ln = 0], [string $align = ''], [int $fill = 0], [mixed $link = ''], [int $stretch = 0], [boolean $ignore_min_height = false])
+*/
+        for($i = 0; $i < count($row['data']); $i++) {
+          $fill = ($s->switchcolor) ? $s->switchstatus : 1;
+          $this->Cell($s->widths[$i], $s->height, $row['data'][$i], $s->border[$i], 0, $s->types[$i], $fill);
+        }
+        $s->switchstatus = (! $s->switchstatus ) ? 1 : 0;
+        $this->Ln();
+
+
+      } // END foreach
+    } // END else
+
+    return(true);
+
+  } // END METHOD cTable }}}
+
+
+  /**
+    Voor het uitprinten van tabellen in cTable() werken we met zgn sjablonen die een
+    rij in een tabel beschrijven. Eerst definieren we een aantal sjablonen en
+    vervolgens sturen we met elke serie data de naam van een sjabloon waarmee
+    die rij in de tabel wordt geprint.
+    Een sjabloon bevat de volgende variabelen:
+    array['sjabloon']
+    - array[widths]      : aantal velden en veldbreedtes; verplicht
+    - array[types]       : veldtypen L, R, C; optioneel, default L
+    - float[height]      : rijhoogte; optioneel, default 0
+    - array[border]      : omlijsting van de velden T, B, L, R of een combinatie daarvan, optioneel, default ''
+    - str[drawspotcolor] : tekenkleur als spotcolor; als deze is ingevuld wordt hij gebruikt en anders wordt color gebruikt; optoneel
+    - array[drawcolor]   : tekenkleur als rgb kleur; optioneel
+    - str[fillspotcolor] : vulkleur als spotcolor; als deze is ingevuld wordt hij gebruikt en anders wordt color gebruikt; optoneel
+    - array[fillcolor]   : vulkleur als rgb kleur; optioneel. Als we in het array fillcolor een array met twee kleuren meegeven:
+                         :   $fillcolor[]=array(kleurA), $fillcolor[]=array(kleurB) dan wordt met die 2 kleuren geswitch't en niet 
+                         :   met 1 kleur $fillcolor=array(kleurB) en het fill mechanisme $switcholor=1. De instelling van switchcolor
+                         :   maakt dan niet meer uit.
+    - str[fontstyle]     : fontstijl B, I, U, D; optioneel, default ''
+    - str[fontsize]      : fontgrootte; optioneel, default ''
+    - str[textspotcolor] : tekstkleur als spotcolor; optioneel
+    - array[textcolor]   : tekstkleur als rgb kleur, optioneel
+    - int[switchcolor]   : 1, 0; geeft aan of de rijen afwisselend gekleurd zijn
+    - int[switchstatus]  : 1, 0; geeft aan of de komende rij gekleurd of transparant moet zijn; wordt door de routine bijgehouden
+  ************************************************{{{ */ 
+  function instellen($s) {
+
+    // Kleuren
+    if($s->fillspotcolor) { 
+      $this->SetFillSpotColor($s->fillspotcolor, 100); // Fill color voor de headerrow
+    }
+    elseif($s->fillcolor) { // color is een array
+      $tmp = array(-1,-1,-1,-1);
+      for($i=0;$i<count($s->fillcolor);$i++) $tmp[$i] = $s->fillcolor[$i];
+      $this->SetFillColor($tmp[0],$tmp[1],$tmp[2],$tmp[3]); // Fill color voor de headerrow
+    }
+    if($s->drawspotcolor) { 
+      $this->SetDrawSpotColor($s->drawspotcolor, 100); // Draw color voor de headerrow
+    }
+    elseif($s->drawcolor) { // color is een array
+      $tmp = array(-1,-1,-1,-1);
+      for($i=0;$i<count($s->drawcolor);$i++) $tmp[$i] = $s->drawcolor[$i];
+      $this->SetDrawColor($tmp[0],$tmp[1],$tmp[2],$tmp[3]); // Draw color voor de headerrow
+    }
+    if($s->textspotcolor) { 
+      $this->SetTextSpotColor($s->textspotcolor, 100); // Text color voor de headerrow
+    }
+    elseif($s->textcolor) { // color is een array
+      $tmp = array(-1,-1,-1,-1);
+      for($i=0;$i<count($s->textcolor);$i++) $tmp[$i] = $s->textcolor[$i];
+      $this->SetTextColor($tmp[0],$tmp[1],$tmp[2],$tmp[3]); // Text color voor de headerrow
+    }
+
+    // Fontstyle and size
+    if($s->fontstyle) $this->SetFont('',$s->fontstyle); 
+    if($s->fontsize) $this->SetFontSize($s->fontize); 
+
+    return(true);
+
+/*
+printr($s);
+Sjabloon Object
+(
+    [widths] => Array
+        (
+            [0] => 20
+            [1] => 90
+            [2] => 35
+            [3] => 35
+        )
+
+    [types] => Array
+        (
+            [0] => C
+            [1] => C
+            [2] => C
+            [3] => C
+        )
+
+    [height] => 0
+    [border] => Array
+        (
+            [0] => 1
+            [1] => 1
+            [2] => 1
+            [3] => 1
+        )
+
+    [fillspotcolor] => Pantone 658 C
+    [fillcolor] => Array
+        (
+        )
+
+    [fontstyle] => 
+    [fontsize] => 
+    [textspotcolor] => 
+    [textcolor] => Array
+        (
+            [0] => 0
+        )
+
+    [switchcolor] => 0
+    [switchstatus] => 0
+)
+*/
+  } // END METHOD instellen }}}
+
+
+} // END CLASS MYPDF
+
+
+Class Sjabloon {
+  var $widths = array();    // aantal velden en veldbreedtes; moet worden ingevuld
+  var $types = array();     // veldtypen L, R, C; optioneel, default L
+  var $height = 0;          // rijhoogte; optioneel, default 0
+  var $border = array();    // omlijsting van de velden 1 (frame) of T, B, L, R of een combinatie daarvan, optioneel, default ''
+  var $drawspotcolor = '';  // tekenkleur als spotcolor; als deze is ingevuld wordt hij gebruikt en anders wordt color gebruikt; optoneel
+  var $drawcolor = array(); // tekenkleur als rgb kleur; optioneel
+  var $fillspotcolor = '';  // vulkleur als spotcolor; als deze is ingevuld wordt hij primair gebruikt en anders wordt color gebruikt; optioneel
+  var $fillcolor = array(); // vulkleur als rgb kleur; optioneel
+  var $fontstyle = '';      // fontstijl B, I, U, D; optioneel, default ''
+  var $fontsize = '';       // fontgrootte; optioneel, default ''
+  var $textspotcolor = '';  // tekstkleur als spotcolor; optioneel; textspotcolor gaat voor textcolor
+  var $textcolor = array(); // tekstkleur als rgb kleur, optioneel
+  var $switchcolor = 0;     // 1, 0; geeft aan of de rijen afwisselend gekleurd zijn
+  var $switchstatus = 0;    // 1, 0; geeft aan of de komende rij gekleurd of transparant moet zijn; wordt door de routine bijgehouden
+
+  public function __construct($widths='',$types='',$border='') {
+    if(is_array($widths)) $this->widths = $widths;
+    if(is_array($types)) $this->types = $types;
+    if(is_array($border)) $this->border = $border;
+  }
+
+} // END CLASS Sjabloon
+
+
+// create new PDF document
+$pdf = new MYPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false); 
+
+// ///////////////////////////////////////////////////////
+// GEGEVENS HIERONDER IN HET AANROEPENDE SCRIPT INSTELLEN
+// ///////////////////////////////////////////////////////
+/*
+require("_pdf.lib");
+
+// Variabele instellingen:
+//
+// Landscape
+#$pdf->landscape = true;
+
+// Laad de tabelsjablonen
+//
+require("_saldibalanssjablonen.inc");
+
+$pdf->initialize();
+//
+// Ander lettertype in Header (en evt footer). Dit moet na initialize omdat
+// initialize het standaard font in Header en Footer zet.
+#$pdf->setHeaderFont(Array('times', '', ''));
+
+// Start de pdf pagina
+//
+if($pdf->landscape) 
+  $pdf->AddPage('L');
+else
+  $pdf->AddPage();
+
+$pdf->SetTitle($pdf->onderwerp);
+$pdf->SetSubject($pdf->onderwerp);
+$pdf->SetKeywords("ML design techniek, administratie {$pdf->boekjaar}, {$pdf->onderwerp}");
+
+// ******************************************************************************* 
+//                                       TESTDATA
+// ******************************************************************************* 
+METHODE MET cTable en sjablonen
+
+$pdf->sjabloon['header'] = New Sjabloon(array(20,90,35,35), array('C','C','C','C'), array('1','1','1','1') );
+$pdf->sjabloon['header']->fillspotcolor = 'Pantone 658 C';
+$pdf->sjabloon['header']->textcolor = array(0); // zwart
+$pdf->sjabloon['header']->height = 7;
+
+$pdf->sjabloon['regular'] = New Sjabloon(array(20,90,35,35), array('C','','R','R'), array('LR','LR','LR','LR') );
+$pdf->sjabloon['regular']->switchcolor = 1;
+$pdf->sjabloon['regular']->height = 6;
+//
+$pdf->sjabloon['regular']->fillcolor = array(224, 235, 255);
+//
+// Als we fillcolor als array met 2 leden benoemen dan wordt geswitch't met deze twee kleuren ipv met 1 kleur en het 'fill' mechanisme
+// De stand van switchcolor maakt dan niets meer uit.
+//
+$pdf->sjabloon['regular']->fillcolor[] = array(255);
+$pdf->sjabloon['regular']->fillcolor[] = array(224, 235, 255);
+
+
+// print de eerste rapportagekopregel zonder scheidingslijn
+$pdf->printKop("Balansrekeningen", false);
+
+$Adata = Array();
+
+$Adata[] = array('sjabloon'=>'header','data'=>array('Nummer','Omschrijving','Debet','Credit') );
+$Adata[] = array('sjabloon'=>'regular','data'=>array('2345','Inventaris',bedrag('143.978,99'),bedrag('12.95') ) );
+$Adata[] = array('sjabloon'=>'regular','data'=>array('3456','Rekening courant prive',bedrag('0,00'),bedrag('2.476,90') ) );
+$Adata[] = array('sjabloon'=>'regular','data'=>array('4567','Te ontvangen BTW',bedrag('3.95'),bedrag('122.58') ) );
+$Adata[] = array('sjabloon'=>'pagebreak','data'=>array() ); // zorgt ervoor dat de geprinte tabel wordt afgebroken, een addPage() wordt gedaan
+$Adata[] = array('sjabloon'=>'header','data'=>array('Nummer','Omschrijving','Debet','Credit') ); // print opnieuw een tabelheader
+$Adata[] = array('sjabloon'=>'regular','data'=>array('2345','Inventaris',bedrag('143.978,99'),bedrag('12.95') ) );
+$Adata[] = array('sjabloon'=>'regular','data'=>array('3456','Rekening courant prive',bedrag('0,00'),bedrag('2.476,90') ) );
+$Adata[] = array(); // print een lijn om de tabel af te sluiten
+
+# $pdf->coloredTable(array('Nummer','Omschrijving','Debet','Credit'), $data, array(20, 90, 35, 35), array('C','L','R','R') );
+$pdf->cTable($Adata);
+
+$pdf->cTable(array(array())); // geeft een lege regel
+
+$pdf->cTable(array()); // geeft een lijn met de breedte van het sjabloon='header' breedte
+
+
+
+METHODE MET coloredTable
+
+// print de eerste rapportagekopregel en scheidingslijn
+$pdf->printKop("Balansrekeningen", true); 
+
+$data = Array();
+
+$data[] = array('2345','Inventaris',bedrag('143.978,99'),bedrag('12.95') );
+$data[] = array('3456','Rekening courant prive',bedrag('0,00'),bedrag('2.476,90') );
+$data[] = array('4567','Te ontvangen BTW',bedrag('3.95'),bedrag('122.58') );
+
+$pdf->coloredTable(array('Nummer','Omschrijving','Debet','Credit'), $data, array(20, 90, 35, 35), array('C','L','R','R'));
+
+// schrijf de pdf uit
+
+$item = "saldibalans";
+
+$bestandsnaam = $item.'-'.$pdf->boekjaar.'-'.preg_replace("/[-]/","",$GLOBALS['timer']->vandaag).'.pdf';
+//Close and output PDF document
+$pdf->Output($bestandsnaam, 'I');
+
+*/

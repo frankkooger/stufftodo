@@ -1,0 +1,582 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _grootboek.lib 296 2015-04-04 16:31:52Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+Class Grootboek {
+
+ 
+  /* ****************************************************************
+  * @METHOD:   void Grootboek() 
+  * @SYLLABUS: Constructor
+  *   Deze class maakt een eigen dbConnector aan. Dit betekent dat de methoden
+  *   uit deze class niet gebruikt kunnen worden in de vorm:
+  *     Grootboek::<methode>
+  *
+  *****************************************************************{{{ */
+  public function __construct() {
+    global $config, $stam;
+
+    $this->file = basename(__FILE__);
+
+  } // END FUNCTION Grootboek }}}
+
+
+  /********************************************************************* 
+  * @METHOD: str kostenplaatsPullDown( str toselect ) 
+  * @RETURNS: string met code voor een pulldown veld in grootboekstam  
+  * @SYLLABUS:  
+  *   Maakt een string met code voor een kostenplaats-pulldown veld in
+  *   grootboekstam
+  *   Geeft een string met het volledige <options> deel terug.
+  *   De meegegeven 'toselect' is default geselecteerd
+  * 
+  /* *********************************************************************{{{ */ 
+  function kostenplaatsPullDown($toselect='') { 
+    global $stam;
+
+printrc2($stam->omslag['value'], "stamomsalgvalue");
+    $splits = ' 1 = 0 '; 
+    if($toselect == '')                         $splits = ' "ID" = 1000000 ';
+    elseif($toselect <  $stam->omslag['value']) $splits = ' "ID" < 400000 ';
+    elseif($toselect >= $stam->omslag['value']) $splits = ' "ID" >= 400000 ';
+
+    $stam->query =<<<EOT
+SELECT 
+  k."ID"
+  ,k."naam"
+  ,g."nummer"
+FROM 
+  {$stam->kostenplaatsen} As k
+LEFT JOIN 
+  {$stam->grootboekstam} AS g 
+ON 
+  (g."kostenplaats"=k."ID")
+WHERE 
+  k."saldi"=1
+AND
+  {$splits}
+ORDER BY 
+  k."ID"
+EOT;
+
+    $stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__);
+
+    $overzicht = "\n<option value=''>-------------------</option>";
+    $hiddens = "\n";
+
+    while($obj = $stam->Do_object()) {
+      $str = ($obj->ID) ?
+        "[{$obj->ID}] {$obj->naam}":
+        "[------] {$obj->naam}";
+
+      if($obj->nummer <> '') $str .= " ($obj->nummer)";
+
+      if($obj->ID != '' && $toselect != '' && $obj->nummer == $toselect) {
+        $overzicht .= "\n<option selected='selected' value='{$obj->ID}'>{$str}</option>";
+        $hiddens .= "\n<input type='hidden' name='m_kostenplaats' value='{$obj->ID}' />";
+      }
+      else 
+        $overzicht .= "\n<option value='{$obj->ID}'>{$str}</option>";
+    }
+
+    return($overzicht.$hiddens);
+
+  } // END METHOD kostenplaatsPullDown}}} 
+
+
+  /********************************************************************* 
+  * @METHOD: str koppelingPullDown( str toselect ) 
+  * @RETURNS: string met code voor een pulldown veld in grootboekstam  
+  * @SYLLABUS:  
+  *   Maakt een string met code voor een pulldown veld in grootboekstam
+  *   Geeft een string met het volledige <options> deel terug.
+  *   De meegegeven 'toselect' is default geselecteerd
+  * 
+  /* *********************************************************************{{{ */ 
+  function koppelingPullDown($toselect='') { 
+    global $stam;
+
+    $stam->query =<<<EOT
+SELECT 
+  k."labelstam" AS "naam"
+  ,k."key"
+  ,g."nummer"
+FROM 
+  {$stam->btwkeys} AS k
+LEFT JOIN 
+  {$stam->grootboekstam} AS g 
+ON 
+  (g."btwkey"=k."key")
+WHERE 
+  k."actief" = 1
+AND 
+  k."labelstam" NOT LIKE ''
+EOT;
+//--  AND k."actief" = 1
+//--ORDER BY k."ccode","naam",g."nummer"
+
+    $stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__);
+
+    $overzicht = "\n<option value=''>-------------------</option>";
+    $hiddens = "\n";
+
+    while($obj = $stam->Do_object()) {
+      $str = ($obj->nummer) ?
+        "[{$obj->nummer}] {$obj->naam}":
+        "[------] {$obj->naam}";
+
+      // vul de hidden var indien rkg_
+      if(preg_match("/^rkg_/",$obj->key))
+          $hiddens .= "\n<input type='hidden' name='m_{$obj->key}' value='{$obj->nummer}' />";
+
+      if($obj->nummer != '' && $obj->nummer == $toselect) {
+        $overzicht .= "\n<option selected='selected' value='{$obj->key}'>{$str}</option>";
+        $hiddens .= "\n<input type='hidden' name='m_btwkey' value='{$obj->key}' />";
+      }
+      else 
+        $overzicht .= "\n<option value='{$obj->key}'>{$str}</option>";
+    }
+
+    return($overzicht.$hiddens);
+
+  } // END METHOD koppelingPullDown}}} 
+
+
+  /********************************************************************* 
+  * @METHOD: str btwDefaultRadio( str toselect ) 
+  * @RETURNS: string met code voor een radiobutton string in grootboekstam  
+  * @SYLLABUS:  
+  *   Maakt een string met code voor een radiobuttons in grootboekstam
+  *   Geeft een string met het volledige radiobuttons terug.
+  *   De meegegeven 'toselect' is default geselecteerd
+  * 
+  /* *********************************************************************{{{ */ 
+  function btwDefaultRadio($toselect='') { 
+    global $stam;
+
+    $stam->query =<<<EOT
+SELECT k."ccode",k."labeldefaults" AS "naam",k."key",
+  g."nummer" FROM {$stam->btwkeys} AS k
+  LEFT JOIN {$stam->grootboekstam} AS g ON (g."btwkey"=k."key")
+  WHERE 
+        k."actief" = 1
+  AND   k."labeldefaults" NOT LIKE ''
+  ORDER BY k."ccode"
+EOT;
+
+    $stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__);
+
+    $overzicht = '';
+    $selected = false;
+
+    while($obj = $stam->Do_object()) {
+
+      // vervang spaties in naam door nbsp zodat de labels niet op de regel afbreken
+      $obj->naam = preg_replace("/ /", "&nbsp;", $obj->naam);
+
+      if($obj->key != '' && $obj->key == $toselect) {
+        $overzicht .= "\n{$obj->naam}:<input type='radio' name='btwdefault' value='{$obj->key}' checked='checked' onChange='c_btwdefault.value=true;' />&nbsp;";
+        $selected = true;
+      }
+      else 
+        $overzicht .= "\n{$obj->naam}:<input type='radio' name='btwdefault' value='{$obj->key}' onChange='c_btwdefault.value=true;' />&nbsp;";
+    }
+
+    // Default 'geen btw' button
+    $overzicht .= $selected ?
+      "\nGeen default:<input type='radio' name='btwdefault' value='' onChange='c_btwdefault.value=true;' />&nbsp;":
+      "\nGeen default:<input type='radio' name='btwdefault' value='' checked='checked' onChange='c_btwdefault.value=true;' />&nbsp;";
+
+    return($overzicht);
+
+  } // END METHOD btwDefaultRadio}}} 
+ 
+
+//Btw privegebruik:<input type='radio' name='btwdefault' value='".BTWPRIVEGEBRUIK."' {$selected['btwdefault'][BTWPRIVEGEBRUIK]} onChange='c_btwdefault.value=true;' />
+
+
+  /* ****************************************************************
+  * @METHOD:   grootboekselectFill($toselect, $lastinserted='') 
+  * @SYLLABUS: 
+  *   Vul de pulldown grootboek select velden.
+  *   Geeft een string met het volledige <options> deel terug.
+  *
+  *****************************************************************{{{ */
+  function grootboekselectFill($toselect, $lastinserted='') {
+    global $stam;
+
+    $stam->Do_query("SELECT * FROM {$stam->grootboekstam} ORDER BY \"nummer\"",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    $overzicht = "\n<option value='0'>-------------------</option>";
+
+    while($obj = $stam->Do_object()) {
+      if($obj->type == TOTAALKAART) 
+        $str = "++++ {$obj->naam} niveau {$obj->nivo} ({$obj->nummer})";
+      else 
+        $str = "{$obj->nummer} {$obj->naam}";
+
+      if($obj->nummer == $toselect) 
+        $overzicht .= "\n<option selected='selected' value='{$obj->nummer}'>{$str}</option>";
+      else if($obj->nummer == $lastinserted) 
+        $overzicht .= "\n<option selected='selected' value='{$obj->nummer}'>{$str}</option>";
+      else 
+        $overzicht .= "\n<option value='{$obj->nummer}'>{$str}</option>";
+    }
+
+    return($overzicht);
+
+  } // END FUNCTION grootboekselectFill }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   insertKaart( &$p ) 
+  * @SYLLABUS: 
+  *   Insert een nieuwe grootboekkaart en GEEN grootboeksaldi
+  *   Controleer eerst of we niet een verwijderde kaart op dit nummer hebben
+  *   staan in dit boekjaar. Dat kan voorkomen als we eerder het nummer uit een
+  *   oud boekjaar verwijderd hebben en het nu weer opnieuw willen aanmaken.
+  *
+  *****************************************************************{{{ */
+  function insertKaart( &$p, $active=1) {
+    global $stam, $msg;
+
+    if($id = $stam->Get_field('id', $stam->grootboekstamtbl, "\"nummer\"={$p->nummer} AND \"boekjaar\"={$stam->boekjaar} AND \"active\"=0", basename(__FILE__).'::'.__LINE__)) {
+      if($stam->Do_query('UPDATE '.$stam->grootboekstamtbl.' SET "active"=1 WHERE "id"='.$id , basename(__FILE__).'::'.__LINE__)) {
+        $msg['blue'][] = "Grootboeknummer hersteld: {$p->nummer} - {$p->naam}";
+        return($p->nummer);
+      }
+      else
+        return(false);
+    }
+    empty($p->nivo) and $p->nivo=0;
+    empty($p->kostenplaats) and $p->kostenplaats=0;
+    $id = $stam->newId($stam->grootboekstamtbl);
+    $fields = '("id","boekjaar","nummer","kostenplaats","active","type","nivo","naam","btwkey","btwdefault")';
+    $values = "({$id},{$stam->boekjaar},{$p->nummer},{$p->kostenplaats},{$active},{$p->type},{$p->nivo},'{$p->naam}','{$p->btwkey}','{$p->btwdefault}')";
+    if($stam->Do_query("INSERT INTO {$stam->grootboekstamtbl} {$fields} VALUES {$values} ", basename(__FILE__).'::'.__LINE__)) {
+      $msg['blue'][] = "Toegevoegd in grootboekstam: {$p->nummer} - {$p->naam} ({$id})";
+  
+/*
+   Bijschrijven in grootboeksaldi vergeten we even. Punt is dat we een
+   aangemaakte, nog lege grootboekkaart niet meer zouden kunnen verwijderen
+   omdat er een saldi-record bestaat. We laten saldi in het vervolg aanmaken
+   door de eerste boekregel op het nieuwe nummer.
+*/
+    } // END IF INSERT INTO grootboekstamtbl
+    else {
+      $msg['red'][] = "NIET toegevoegd in grootboekstam: {$p->nummer} - {$p->naam}";
+      return(false);
+    }
+
+  } // END FUNCTION insertKaart }}}
+
+  
+  /* ****************************************************************
+  * @METHOD:   deleteKaart( $nummer) 
+  * @SYLLABUS: 
+  *   Verwijder een grootboekkaart o.b.v. het grootboeknummer.
+  *   Met invoering van de nieuwe historie werkt delete kaart als volgt:
+  *    - Als de kaart van een eerder boekjaar is dan het huidige, dan inserten
+  *    we een nieuw record in het huidige boekjaar met "active" op 0. Dit
+  *    overschaduwt de oude kaart maar de oude kaart blijft gewoon bestaan voor
+  *    de eerdere jaren.
+  *    - Als de kaart nog van dit boekjaar is of een nieuw, op de oude manier
+  *    deleten, dus helemaal verwijderen, maar dan wel alleen de kaart van dit jaar!
+  *    - Als de kaart in de toekomst ligt, dan niets mee doen; kan alleen
+  *    eigen, of ouder boekjaar deleten
+  *
+  *****************************************************************{{{ */
+  function deleteKaart( &$p) {
+    global $stam, $msg;
+
+    if($p->historie > $stam->boekjaar) { // te nieuwe kaart
+      $msg['red'][] = ('Kan geen nummer ('.$p->nummer.') uit een nieuwer jaar ('.$p->historie.') dan huidig jaar verwijderen!');
+      return(false);
+    }
+    elseif($p->historie < $stam->boekjaar) { // oude kaart
+      if($this->insertKaart($p, $active=0))
+        return($p->nummer);
+      else
+        return(false);
+    }
+    else {
+      if($stam->Delete_record($stam->grootboekstamtbl, "\"nummer\"={$p->nummer} AND \"boekjaar\"={$stam->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__ )) {
+        if($stam->Delete_record($stam->grootboeksaldi, "\"nummer\"={$p->nummer} AND \"boekjaar\"={$stam->boekjaar}", $this->file."::".__FUNCTION__."::".__LINE__)) { 
+            return('');
+          }
+          else
+            return($p->nummer);
+      }
+      else
+      return($p->nummer);
+    }
+
+  } // END FUNCTION deleteKaart }}}
+
+  
+  /* ****************************************************************
+  * @METHOD:   selectJSGeenBtwKaarten() 
+  * @SYLLABUS: 
+  *   Geeft een string met kant en klaar Javascript switch statement terug met
+  *   grootboekrekeningen waarvan de status 'GEENBTW' of groter (BTWVERKOOPVERLEGD)
+  *
+  *   LET OP: Deze methode wordt ook van buitenaf aangeroepen indien niet in de
+  *   context van een object. Zorg er daarom voor dat de methode selfsupporting
+  *   is en geen object-variabelen aanroept!
+  *
+  *****************************************************************{{{ */
+  function selectJSGeenBtwKaarten() {
+    global $stam;
+
+    $str = '';
+    $stam->query = "SELECT \"nummer\" FROM {$stam->grootboekstam} "
+                  ."WHERE ".SELECTGEENBTW." ORDER BY \"nummer\"";
+    if($stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__)) {
+      $str .= "switch(a) {\n";
+      while($arr = $stam->Do_assoc()) {
+        $str .= "      case '{$arr['nummer']}' :\n";
+      }
+      $str .= "        disableBtw();\n";
+      $str .= "        break;\n";
+      $str .= "      default:\n";
+      $str .= "        enableBtw();\n";
+      $str .= "        break;\n";
+      $str .= "    }\n";
+      return($str);
+    }
+    else
+      return(false);
+
+  } // END FUNCTION selectJSGeenBtwKaarten }}}
+
+  
+  /* ****************************************************************
+  * @METHOD:   aanmakenSaldi() 
+  * @SYLLABUS: 
+  *   Geconsolideerde grootboeksaldi aanmaken en herstellen.
+  *   Door foute boekingen b.v. tijdens programmafouten kan het voorkomen dat
+  *   de grootboeksaldi uit synch raken. Met deze methode worden ze weer voor
+  *   het huidige boekjaar hersteld.
+  *   Tevens worden saldi-records gemaakt voor grootboekrekeningen DIE EEN
+  *   SALDO HEBBEN en waarvan nog geen saldo record bestaat, ergo als deze
+  *   method wordt gedraaid met een nieuw boekjaar worden voor alle
+  *   grootboekrekeningen uit grootboekstam waarvoor een boekregel bestaat
+  *   saldi records gemaakt voor dat nieuwe jaar. Dat kan b.v. ook de
+  *   beginbalans zijn.
+  *   DEZE METHODE KAN NIET van buitenaf opgeroepen worden maar als object.
+  *
+  *****************************************************************{{{ */
+  function aanmakenSaldi() {
+    global $stam;
+
+    // Sinds SQL versie 1.12.0 gebruiken we een view "vw_boekregelsaldi" voor dit method!
+    // De view geeft een opsomming van boekregelsaldi, saldosaldi, boekjaar en grootboekrekening
+    // van het huidige boekjaar. Als het saldosaldi IS NULL dan bestaat er voor die
+    // grootboekrekening nog geen saldorecord voor het huidige boekjaar. Maak die dan aan
+    //
+    //  Regelsaldo; Saldisaldo; boekjaar; grootboekrekening
+    //     -804.59;    -804.59;     2013;         8110
+    //    -1250.00;           ;     2013;         8190     // Heeft een Null value
+    //        0.34;       0.34;     2013;         8900
+
+    // First insert
+    //
+    $newid = $stam->newId($stam->grootboeksaldi);
+    $stam->Do_query("INSERT INTO {$stam->grootboeksaldi} (\"id\",\"boekjaar\",\"nummer\",\"saldo\") SELECT "
+                       ."{$newid} As \"id\", vs.\"boekjaar\", \"grootboekrekening\", \"Regelsaldo\" "
+                       ."FROM \"vw_boekregelsaldi\" vs "
+                       ."WHERE \"Saldisaldo\" IS NULL ",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Then updates
+    //
+    $updatearr = array();
+    $stam->Do_query("SELECT * FROM \"vw_boekregelsaldi\" "
+                       ."WHERE \"Regelsaldo\"<>\"Saldisaldo\" ",$this->file."::".__FUNCTION__."::".__LINE__);
+    while ($obj = $stam->Do_object())
+      $updatearr[] = $obj;
+printrc2($updatearr, "updatearr");
+
+    foreach ($updatearr As $obj)
+      $stam->Do_query("UPDATE {$stam->grootboeksaldi} SET \"saldo\"={$obj->Regelsaldo} "
+                         ."WHERE \"nummer\"={$obj->grootboekrekening} AND \"boekjaar\"={$obj->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Het kan voorkomen dat er een saldoregel is maar geen boekstukregels meer voor een rekening (hoort niet maar ingeval er direct in de tabellen geknoeid wordt)
+    // In dat geval moet de saldoregel verwijderd worden
+    $stam->Do_query("DELETE FROM {$stam->grootboeksaldi} WHERE \"boekjaar\"={$stam->boekjaar} AND \"nummer\" NOT IN "
+                  ."(SELECT DISTINCT \"grootboekrekening\" FROM \"vw_boekregelsaldi\") ",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    return(true);
+
+  } // END FUNCTION aanmakenSaldi }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool veranderRekeningnummer( int $nummerOud, int $nummerNieuw ) 
+  * @SYLLABUS: 
+  *   Verandert een grootboekrekeningnummer in alle relevante tabellen waarin
+  *   rekeningnummers (kunnen) voorkomen. Dit maakt het mogelijk om ook nog bij
+  *   een draaiende administratie rekeningnummers te veranderen.
+  *
+  *****************************************************************{{{ */
+  function veranderRekeningnummer($nummerOud,$nummerNieuw,$grootboekOok=false) {
+    global $stam;
+
+    $huidigJaar = $stam->boekjaar;
+
+    // Stel de querys samen
+    //
+    // Belangrijk: In Mysql You can't update the same table which you use in the SELECT part.
+    // This behaviour is documented at: http://dev.mysql.com/doc/mysql/en/UPDATE.html
+    // De select moet dan plaatsvinden op een temp tabel, zie ook:
+    // http://forums.devshed.com/mysql-help-4/update-cannot-specify-target-table-in-from-clause-513821.html
+    // Bij andere drivers willen we dit voorkomen omdat het overhead oplevert.
+    // Aan de andere kant: de temp constructie werkt bij alle drivers (ook sqlite(3)) dus voor
+    // het gemak maken we dit eenduidig. De overhead is minimaal voor de enkele keer dat dit voorkomt.
+
+    // if($GLOBALS['config']->data['db']['driver'] == 'mysql') {
+
+    $query[]=<<<EOT
+  UPDATE {$stam->boekregelstbl}
+  SET "grootboekrekening"={$nummerNieuw}
+  WHERE "boekregelid" IN (
+    SELECT "boekregelid" FROM (
+      SELECT "boekregelid" FROM "vw_boekregels"
+      WHERE "grootboekrekening"={$nummerOud} )
+    As temp
+  )
+EOT;
+    $tabellen[] = $stam->boekregelstbl;
+/*
+    $query[]=<<<EOT
+  UPDATE {$stam->boekregels_trash}
+  SET "grootboekrekening"={$nummerNieuw}
+  WHERE "id" IN (
+    SELECT "id" FROM (
+      SELECT b."id" FROM {$stam->boekregels_trash} AS b
+      LEFT JOIN {$stam->journaal} AS j
+      ON j."id" = b."journaalid"
+      WHERE b."grootboekrekening"={$nummerOud} 
+      AND j."boekjaar"={$huidigJaar} )
+    AS temp
+  )
+EOT;
+    $tabellen[] = $stam->boekregels_trash;
+*/
+    $query[]=<<<EOT
+  UPDATE {$stam->eindbalansregels}
+  SET "grootboekrekening"={$nummerNieuw}
+  WHERE "id" IN (
+    SELECT "id" FROM (
+      SELECT b."id"
+      FROM {$stam->eindbalansregels} AS b
+      JOIN {$stam->eindbalansen} AS j
+      ON j."id" = b."ideindbalans"
+      WHERE b."grootboekrekening"={$nummerOud} 
+      AND j."boekjaar"={$huidigJaar} )
+    AS temp
+  )
+EOT;
+    $tabellen[] = $stam->eindbalansregels;
+
+    $query[]=<<<EOT
+  UPDATE "dagboeken"
+  SET "grootboekrekening"={$nummerNieuw}
+  WHERE "id"=(SELECT * FROM
+      (SELECT "id" FROM "vw_dagboeken"
+       WHERE "grootboekrekening"={$nummerOud})
+      As temp)
+EOT;
+    $tabellen[] = $stam->dagboeken;
+
+    $query[]=<<<EOT
+  UPDATE {$stam->grootboeksaldi} 
+  SET "nummer"={$nummerNieuw}
+  WHERE "nummer"={$nummerOud} 
+  AND "boekjaar"={$huidigJaar}
+EOT;
+    $tabellen[] = $stam->grootboeksaldi;
+
+    if($grootboekOok) {
+
+    $query[]=<<<EOT
+  UPDATE "grootboekstam"
+  SET "nummer"={$nummerNieuw}
+  WHERE "id"=(SELECT * FROM
+      (SELECT "id" FROM "vw_grootboekstam"
+       WHERE "nummer"={$nummerOud})
+      As temp)
+EOT;
+    $tabellen[] = $stam->grootboekstam;
+
+    }
+
+    $query[]=<<<EOT
+  UPDATE {$stam->stam}
+  SET "value"='{$nummerNieuw}'
+  WHERE "id"=(SELECT * FROM
+      (SELECT "id" FROM "vw_stamgegevens"
+       WHERE "value"='{$nummerOud}')
+      As temp)
+EOT;
+    $tabellen[] = $stam->stam;
+
+printrc2($query); #die;
+printrc2($tabellen); #die;
+
+    // fire the querys
+    //
+    $i=0;
+    foreach($query AS $val) {
+      $stam->Do_query($val, $this->file."::".__FUNCTION__."::".__LINE__);
+      $x = $stam->N_affected_rows();
+      $GLOBALS['msg']['blue'][] = "Nummer is ". (($x) ? $x.' x' : 'niet') ." veranderd in {$tabellen[$i++]}";
+    }
+    return(true);
+
+  } // END FUNCTION veranderRekeningnummer }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool ExistsNieuwNummer( int $nummerNieuw ) 
+  * @SYLLABUS: 
+  *   Controleert of een nieuw gevraagd rekeningnummer al bestaat.
+  *
+  *****************************************************************{{{ */
+  function ExistsNieuwNummer($nummerNieuw, $showmsg=true) {
+    global $stam;
+
+    $huidigJaar = $stam->boekjaar;
+
+    // bepaal of het nieuw gevraagde nummer al bestaat. Indien dat het geval is geef een melding terug en stop
+    if($stam->Get_field('COUNT("id")', $stam->grootboekstam, "\"nummer\"={$nummerNieuw}",$this->file."::".__FUNCTION__."::".__LINE__)) { // Nummer bestaat nog/al
+      if($showmsg)
+        $GLOBALS['msg']['red'][] = "Het nummer: {$nummerNieuw} bestaat al! Kies een ander nummer";
+      return(true);
+    }
+
+  } // END FUNCTION ExistsNieuwNummer }}}
+
+
+} // END CLASS Grootboek
+
+
+/* __END__ */

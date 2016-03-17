@@ -1,0 +1,214 @@
+
+table.aform {
+ /* border:'0' cellpadding:'2' cellspacing:'0' width:'100%' style='border:solid 1px black;'> */
+  border:solid 1px black;
+}
+
+.lightgray {
+  background:#e4e0db;
+}
+
+.darkgray {
+  background:#cbc7c3;
+}
+
+.admin {
+  background:#edbbbb;
+}
+
+.blueheader {
+  background:#a9d0ff;
+}
+
+.amount {
+  text-align:right;
+}
+
+.disabled {
+  background:#e4e0db;
+  color:BLUE;
+}
+
+ .pointer
+,.textpointer {
+  cursor:pointer;
+}
+
+.textpointer {
+  color:black;
+  text-decoration:underline;
+}
+
+div.schemarow_std1
+{
+  color:black;
+  font-size:100%;
+  padding:2 0 2 2;
+}
+
+ .schemarow_enh
+,.schemarow_enh_darkblue 
+{
+  color:black;
+  font-size:100%;
+  padding:8 0 8 12;
+}
+
+.schemarow_enh_darkblue {
+  color:darkblue;
+}
+
+ .schemarow_std
+,.schemarow_std_emp
+,.schemarow_center
+,.schemarow_head
+,.schemarow_head_white {
+  color:black;
+  font-size:100%;
+  padding:2 2 2 2;
+}
+
+.schemarow_std_emp {
+  font-style:italic;
+}
+
+ .schemarow_head
+,.schemarow_head_debet
+,.schemarow_head_credit
+,.schemarow_head_center
+,.schemarow_head_white
+,.schemarow_head_debet_white
+,.schemarow_head_credit_white 
+{
+  font-size: 110%;
+  font-variant: small-caps;
+}
+
+ .schemarow_head_white
+,.schemarow_head_debet_white
+,.schemarow_head_credit_white 
+,.schemarow_head_center_white
+{
+  color:white;
+}
+
+ .schemarow_debetsum
+,.schemarow_creditsum 
+{
+  padding:4 6 4 6;
+  border: 1px solid black;
+  min-height:15px;
+}
+
+ .schemarow_debetsum {
+}
+
+ .schemarow_creditsum {
+}
+
+ .schemarow_head_debet
+,.schemarow_head_credit
+,.schemarow_head_debet_white
+,.schemarow_head_credit_white 
+{
+  padding:4 6 4 2;
+  text-align:right;
+}
+
+ .schemarow_center
+,.schemarow_head_center
+,.schemarow_head_center_white 
+{
+  text-align:center;
+}
+
+ .schemarow_head_center
+,.schemarow_head_center_white 
+{
+  padding:4 6 4 2;
+}
+
+ .schemarow_debet
+,.schemarow_credit 
+{
+  padding:4 6 4 2;
+  text-align:right;
+}
+
+ .schemarow_debet {
+}
+
+ .schemarow_credit {
+}
+
+ .veldsub
+,.veldsub_nomargin
+,.veldsub_enh
+,veldsub_nomargin_enh 
+{
+  padding:2 4 2 4;
+  border: 1px solid black;
+}
+
+ .veldsub
+,.veldsub_enh 
+{
+  margin-right: 20;
+}
+
+ .veldsub_enh
+,veldsub_nomargin_enh 
+{
+  font-weight: bold;
+}
+
+/* BUTTON */
+
+.bsmall
+{
+  background: #C0C0C0;
+  border: thin solid #3A4192;
+  border-width: 0px;
+  padding: 1 1 1 1;
+  margin: 0 0 0 0;
+  font-size: 100%;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.bsmall2
+{
+  background: #C0C0C0;
+  border: thin solid #3A4192;
+  border-width: 1px;
+  padding: 1 1 1 1;
+  margin: 0 0 0 0;
+  font-size: 100%;
+  font-weight: normal;
+  cursor: pointer;
+  outline-style:outset;
+  outline-width:1px;
+}
+
+.bsmall3
+{
+  background: #ccffff;
+  padding: 1;
+  margin: 1;
+  font-weight: normal;
+}
+
+.esmall
+{
+  font-size: 70%;
+}
+
+table#collapsed{border-collapse: collapse; border: 2px solid black; background-color: #ccffff; width: 80%; caption-side:bottom;}
+table#collapsed thead{}
+table#collapsed tbody tr{}
+table#collapsed tbody td{border: 1px solid gray;}
+table#collapsed colgroup{}
+table#collapsed col{}
+table#collapsed td{}
+table#collapsed th{}
+table#collapsed tfoot{}

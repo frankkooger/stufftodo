@@ -1,0 +1,27 @@
+Stoppen en starten van MySql als applicatie
+
+starten
+-------
+ga naar de mysql-bin directory
+open een command shell
+> mysqld --console (voor output naar console)
+> mysqld           (output naar logfile)
+
+Look for the batch file mysql_start.bat in the xampp directory. My mysql_start.bat file includes this line:
+mysql\bin\mysqld --defaults-file=mysql\bin\my.cnf --standalone --console
+
+
+stoppen
+-------
+ga naar de mysql-bin directory
+open een andere command shell
+> mysqladmin.exe -u root shutdown
+
+my.ini
+------
+# SQL modes om in lijn te blijven met sqlite en FireBird ('echte' SQL engines)
+#
+sql-mode=PIPES_AS_CONCAT,ANSI_QUOTES
+
+exporteren van dumpfiles met dubbelquotes gaat dmv mysqldump --compatible=ansi ....
+

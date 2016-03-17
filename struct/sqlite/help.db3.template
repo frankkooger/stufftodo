@@ -1,0 +1,15 @@
+-- vim: syntax=sql
+--
+-- Dit is de structuur van de sqlite3 helpdatabase: help.db3
+--
+
+DROP TABLE "HELP";
+CREATE TABLE "HELP" (
+  "HELPcode" varchar(64) default '',
+  "HELPrubriek" varchar(32) default '',
+  "notinindex" INTEGER default '0',
+  "HELPlink" varchar(32) default '',
+  "HELPtitel" varchar(64) default '',
+  "HELPtext" text default ''
+);
+CREATE UNIQUE INDEX "code" ON "HELP" ("HELPrubriek","HELPcode");

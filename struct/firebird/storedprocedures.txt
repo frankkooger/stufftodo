@@ -1,0 +1,73 @@
+-- vim: syntax=sql
+--
+-- stored procedures voor administratie-database in Firebird
+--
+
+-- isql form of CONNECT:
+CONNECT
+  "/pub/webs/openadministratie/dbase/administratie.fdb" 
+  user 'sysdba' password 'OpenAdmin.nl';
+
+DROP PROCEDURE VW_DAGBOEK;
+SET TERM ^ ;
+CREATE PROCEDURE Vw_DAGBOEK
+RETURNS (
+    "code" VARCHAR (2),
+    "subcode" VARCHAR (4),
+    "grootboekrekening" INTEGER,
+    "naam" VARCHAR(64)
+    )
+AS
+BEGIN
+FOR
+  SELECT s."code" AS "scode", s."subcode", d."grootboekrekening", s."naam"
+  FROM "dagboeken" AS d
+  INNER JOIN "stamgegevens" AS s
+  ON (CAST(d."grootboekrekening" AS varchar(12)) = s."value")
+  WHERE s."code"='e' AND d."grootboekrekening" <> 0
+  ORDER BY "scode", cast(s."subcode" as integer)
+  INTO :"code", :"subcode", :"grootboekrekening", :"naam"
+DO SUSPEND;
+END ^
+SET TERM ; ^
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK ORDER BY scode, cast("subcode" as integer);
+
+--
+-- sqlite:
+CREATE VIEW VW_DAGBOEK AS
+SELECT s."code" AS scode,s."subcode",d."grootboekrekening",s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (d."grootboekrekening" = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY scode, cast(s."subcode" as integer);
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK;
+
+--
+-- mysql:
+CREATE VIEW VW_DAGBOEK AS
+SELECT s."code" AS scode,s."subcode",d."grootboekrekening",s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (d."grootboekrekening" = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY scode, s."subcode" + 0;
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK;
+
+-- Firebird:
+CREATE VIEW VW_DAGBOEK ("scode","subcode","grootboekrekening","naam") AS
+SELECT s."code", s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (CAST(d."grootboekrekening" AS varchar(12)) = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0;
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK ORDER BY scode, cast("subcode" as integer);;
+

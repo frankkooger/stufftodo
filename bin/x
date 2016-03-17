@@ -1,0 +1,11 @@
+msg: Array
+(
+    [red] => 
+    [blue] => Array
+        (
+            [0] => Saldo hersteld: 2210 - oud: -35.96 / nieuw: 0.00
+            [1] => Saldo hersteld: 1060 - oud: -3273.63 / nieuw: -2802.14
+        )
+
+)
+ Function ereg_replace() is deprecated in /pub/webs/administratie/lib/_oa.lib on line 934

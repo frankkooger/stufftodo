@@ -1,0 +1,48 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _factory_mysql.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+require("_dbasemysql.lib");        // mysql driver
+
+// Zet Mysql in ANSI mode na geslaagde connect
+// Bevraag sql_mode met:  select @@SESSION.sql_mode;
+
+Class DbFactory extends DbConnector {
+
+  public function __construct($dbh="", $dbu="", $dbp="", $dbase="", $debug="neutral", $connectid=0) {
+    if($connect = parent::__construct($dbh, $dbu, $dbp, $dbase, $debug, $connectid)) {
+      if(mysql_query("set SESSION sql_mode='ANSI_QUOTES,PIPES_AS_CONCAT'")) {
+      //if(mysql_query("set SESSION sql_mode='Traditional'")) {
+        // controle
+        //$this->Do_query('SELECT "label","naam","value" FROM "stamgegevens"');
+        //$this->Do_query('SELECT label,naam,value FROM stamgegevens');
+        //while($obj = $this->Do_object())
+          //printrc1($obj);
+        return($connect);
+      }
+    }
+    return(false);
+  }
+
+} // END CLASS DbFactory extends DbConnector;
+
+?>

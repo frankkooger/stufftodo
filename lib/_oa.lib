@@ -1,0 +1,3060 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _oa.lib 285 2014-12-09 20:43:58Z frank $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+/**
+* Combined lib, replaces several commonly used ml libs and classes {{{
+*
+* This library combines and replaces the global libs and classes:
+* _global.lib
+*   classes:
+*     Params($arr="",$type="")
+*     Dummy()
+*   functions:
+*     cdatum_norm2iso($datum)  {
+*     cdatum_iso2norm($datum,$nul = 0)  {
+*     cdatum_iso2tekst($datum,$nul = 0)  {
+*     cdatum_unix2tekst($datum,$nul = 0)  {
+*     getmicrotime() {
+*     printbr($str="") {
+*     printnl($str="") {
+*     printdos($str="") {
+*     printcomment($str="") {
+*     printc($str) { // alias voor printcomment
+*     printr($str="",$comment='',$return=false) {
+*     printrc($str="",$comment='',$return=false) { // printr tussen html comment tags
+*     printversie($datum="", $str="", $script="" ) {
+*     printerror($str) {
+*     printdebug($str) {
+*     debugh($a="", $b="", $c="", $d="", $e=""  )  {
+*     debugn($a="", $b="", $c="", $d="", $e=""  )  {
+*     debuge($a="", $b="", $c="", $d="", $e=""  )  {
+*     haveapeek($exit = "") {
+*     is_email($em)  {
+*     showrecordnotavailable($a = "") {
+*     parsebody($str) {
+*     parseTypoLinks($str) {
+*     parsebodyLocal($str) {
+*     check_pagemem($arr, $sep="|")  {
+*     no_cache() {
+*     replacechar($text,$mod=""){
+*     randomint($max = 100000000) {
+*     formatInputBedrag($some_number) // maakt van vrijwel elk getalformat een getal: nnnnn.nn
+*     formatbedrag($some_number, [true], [false]) // formatteert een bedrag in formaat: nn.nnn.nnn,nn
+*     bedrag($some_number) // combineert formatbedrag(formatInputBedrag($some_number), [true], [false])
+*     goto_pagina($pad) {
+*     reload_former()  {
+*     arrprint($arr) {
+*     objectvarsprint(&$connectie) {
+*     methodsprint(&$connectie) {
+* _commandline.lib
+*   functions:
+*     function printn($str="") {
+*     function printnn($str="") {
+*     function print_d($arr) {
+*     function fopena($str="") {
+*     function fopenw($str="") {
+*     function fopenr($str="") {
+*     function expand_argv($argv, $grantedwa="", $grantedws="") {
+* _date.lib
+*   classes:
+*     DateConnector
+*   functions:
+*     datumPlus1
+*   parms:
+*     obj (DateConnector) timer
+* _logging.lib
+*   classes:
+*     Logger
+*     File
+*     Filewrapper (extends File)
+* _mailer.class
+*   classes:
+*     Mailer
+* _user.lib
+*   classes:
+*     UserClass
+*
+*
+* @access    public
+* @author    Frank Kooger <frank@ml-design.com>
+* @version   20050823
+}}} */
+
+/* ****************************************************************
+* @LIB:      _global.lib AND _commandline.lib
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+// INITIALIZE GLOBALLY USED VARIABLES
+
+/* ****************************************************************
+* @CLASS:    Params() 
+* @SYLLABUS: 
+*   Brengt de invoerparameters (vooral uit forms) in een object en voegt eventueel default waarden eraan toe.
+*   Heeft een interne methode om ongewenste characters te verwijderen:
+*     - $clean = true: verwijder ongewenste characters
+*   Heeft een interne methode om strings te quoten:
+*     - quote='': geen quoting
+*     - quote='sqlite|firebird': sybase en sqlite type quoting (' wordt '')
+*     - quote='mysql': addslashes (mysql quoting)
+* @SYNTAX:
+*   $p = new Params( array('parm1'=>'default','parm2=>'','parm3'=>3), "_PG", mode=0, globals=true)
+*   - declareer in ieder geval parm1 tm 3 ook als ze niet zijn gevonden en geef parm1 tm 3 default waarden mee
+*   - lees alleen de parms uit _POST en _GET
+*   - geen quoting van de invoervelden
+*   - maak de parms niet alleen in het $p object maar ook globaal beschikbaar
+*
+*****************************************************************{{{ */
+class Params {
+  public function __construct($arr="", $type="", $clean=false, $quote='', $globals=false) {
+    switch($type) {
+      case '_POST'   : $p = $_POST; break;
+      case '_GET'    : $p = $_GET; break;
+      case '_PG'     : $p = array_merge($_POST, $_GET); break;
+      case '_COOKIE' : $p = $_COOKIE; break;
+      case '_SESSION': $p = $_SESSION; break;
+      default        :
+        // _SESSION niet in de merge meenemen want kan interfereren met andere parms zoals _COOKIE
+        $p = array_merge($_COOKIE, $_POST);
+        $p = array_merge($p, $_GET);
+        break;
+    }
+    // defaults checken
+    if(is_array($arr)) { // er zijn default waarden meegegeven
+      // controleer of er default-vars ontbreken in de hierboven aangeboden parms
+      // en voeg die, met hun default waarde, toe aan het object
+      foreach($arr AS $k=>$v) if(! isset($p[$k])) $p[$k] = $v;
+    }
+    // clean and quote
+    if($clean) {
+      foreach($p AS $k=>$val) { 
+        if(is_array($val)) continue;
+        else $p[$k] = $this->cleanFF($val); 
+      }
+    }
+    if($quote) {
+      switch($quote) {
+        case 'firebird' :
+        case 'sqlite'   : foreach($p AS $k=>$val) { if(is_array($val)) continue; else $p[$k] = $this->quoteSybase($val); } break;
+        case 'mysql'    : foreach($p AS $k=>$val) { if(is_array($val)) continue; else $p[$k] = $this->quoteMysql($val); } break;
+      }
+    }
+    // voeg de hierboven aangeboden parms, met hun waarde, toe aan het 
+    // object en evt. aan de GLOBALS
+    foreach($p AS $k=>$v) {
+      ($globals) ? $this->$k = $GLOBALS[$k] = $v : $this->$k = $v;
+    }
+  } // END CONSTRUCTOR
+
+  // clean input
+  function cleanFF($input) {
+    return(strtr($input,';<>!()`','       '));
+  }
+
+  // quote sybase
+  function quoteSybase($input) {
+    return(preg_replace("/[']/","''",$input));
+  }
+
+  // clean input
+  function quoteMysql($input) {
+    return(addslashes($input));
+  }
+
+} // END CLASS Params }}}
+
+/* ****************************************************************
+* @CLASS:    Dummy() 
+* @SYLLABUS: Een skeleton class voor een leeg object. 
+*
+*   Dit is achterhaald met de standaard php methode: $obj = new stdClass();
+*   die precies hetzelfde doet met de in php ingebouwde dummyclass 'stdClass'.
+*   
+*   Als het erom gaat een ander object b.v. een array om te zetten naar een
+*   object, dan is een snellere oneliner:
+*     $obj = (object)$arr;
+*
+*****************************************************************{{{ */
+class Dummy{
+} // END CLASS Dummy }}}
+
+// AUXILLERY FUNCTIES
+
+/* ****************************************************************
+* @FUNCTION:   printbr() 
+* @SYLLABUS: 
+*   performs printing with a <br />newline (Webversion)
+*
+*****************************************************************{{{ */
+function printbr($str="") {
+  echo "\n".$str."<br />\n";
+} // END FUNCTION printbr }}}
+
+/* ****************************************************************
+* @FUNCTION:   printnl() 
+* @SYLLABUS: 
+*   performs printing with a newline (commandlineversion)
+*
+*****************************************************************{{{ */
+function printnl($str="", $lines=1) {
+  echo $str;
+  for($i=0;$i<$lines;$i++) print("\n");
+} // END FUNCTION printnl }}}
+
+/* ****************************************************************
+* @FUNCTION:   printdos() 
+* @SYLLABUS: 
+*   performs printing with a newline (commandlineversion)
+*
+*****************************************************************{{{ */
+function printdos($str="") {
+  echo rtrim($str)."\r\n";
+} // END FUNCTION printdos }}}
+
+/* ****************************************************************
+* @FUNCTION:   printcomment() 
+* @SYLLABUS: 
+*   performs printing with HTML-comment (Webversion)
+*
+*****************************************************************{{{ */
+function printcomment($str="") {
+  echo "\n<!-- ".$str." -->\n";
+} // END FUNCTION printcomment }}}
+
+/* ****************************************************************
+* @FUNCTION:   printpre() 
+* @SYLLABUS: 
+*   performs printing between <pre> tags (Webversion)
+*
+*****************************************************************{{{ */
+function printpre($str="") {
+  echo "<pre>".$str."</pre>\n";
+} // END FUNCTION printpre }}}
+
+/* ****************************************************************
+* @FUNCTION:   printc() 
+* @SYLLABUS: 
+*   performs printing with HTML-comment (Webversion)
+*   alias for printcomment
+*
+*****************************************************************{{{ */
+function printc($str="") {
+  printcomment($str);
+} // END FUNCTION printc }}}
+
+/* Debug printing 
+Debug printing vindt altijd achter het form plaats, dus tussen <!-- --> tags
+De function die dat in basis verzorgt is "printrcd"
+
+Er zijn 3 levels van debugprinting:
+
+0: print nooit
+1: print als debuglevel=1
+2: print als debuglevel=2
+
+De levels zijn aan te sturen door functies:
+  printrc1(obj, comment, return)
+  printrc2(obj, comment, return)
+Deze functies sturen op zich weer "printrcd" aan.
+
+De config instelling zijn:
+  debug['level'] = {0,1,2}
+  debug['dbase'] = {false,true}
+
+Als 'dbase' is true dan worden tevens alle dbase queries uitgeprint.
+
+Als 
+  debug['level'] == 0
+dan kan tijdelijk nog debug worden aangezet door in de lib directory
+een bestandje 'debug1' of 'debug2' te touchen.
+Een bestandje 'debugd' zet dbase debugging aan.
+
+Let wel: "printrcd" print dus altijd, los van alle instellingen!
+
+Voor het form printen (dus zichtbaar in het html form):
+de functie "printr" print altijd in de voorgrond (dus zonder <!-- --> tags
+wanneer:
+  debug['level'] != 0
+
+***************************************************************** */
+
+
+/* ****************************************************************
+* @FUNCTION:   printr() 
+* @SYLLABUS: 
+*   Doesn't print when debug>verbose['level'] == 0
+*   else preforms a prinrd
+*
+*****************************************************************{{{ */
+function printr($obj="",$comment='',$return=false) {
+  if(empty($GLOBALS['config']->data['debug']['level'])) return(false);
+  elseif($return) return(printrd($obj,$comment,$return));
+  else printrd($obj,$comment,$return);
+} // END FUNCTION printr }}}
+
+/* ****************************************************************
+* @FUNCTION:   printrd() 
+* @SYLLABUS: 
+*   performs printing of print_r with preformat tags
+*   if return==true, the output is returned without preformat tags to use in logfiles
+*   if return==false, the output is printed with preformat tags
+*
+*****************************************************************{{{ */
+function printrd($obj="",$comment='',$return=false) {
+  if($return) {
+    if($comment != '') return($comment." ".print_r($obj,true));
+    else return(print_r($obj,true));
+  }
+  else {
+    print("\n<pre>");
+    $comment != '' and print($comment);
+    print_r($obj);
+    print("</pre>\n");
+  }
+} // END FUNCTION printrd }}}
+
+/* ****************************************************************
+* @FUNCTION:   printrc1() 
+* @SYLLABUS: 
+*   prints when debug>verbose['level'] >= 1
+*
+*****************************************************************{{{ */
+function printrc1($obj="",$comment='',$return=false) {
+  if($GLOBALS['config']->data['debug']['level'] >= 1) {
+    if($return) return(printrcd($obj,$comment,$return));
+    else printrcd($obj,$comment,$return);
+  }
+  return(false);
+} // END FUNCTION printrc1 }}}
+
+/* ****************************************************************
+* @FUNCTION:   printrc2() 
+* @SYLLABUS: 
+*   prints when debug>verbose['level'] >= 2
+*
+*****************************************************************{{{ */
+function printrc2($obj="",$comment='',$return=false) {
+  if($GLOBALS['config']->data['debug']['level'] >= 2) {
+    if($return) return(printrcd($obj,$comment,$return));
+    else printrcd($obj,$comment,$return);
+  }
+  return(false);
+} // END FUNCTION printrc2 }}}
+
+/* ****************************************************************
+* @FUNCTION:   printrcd() 
+* @SYLLABUS: 
+*   performs printing of print_r with preformat between html comment tags
+*   if return==true, the output is returned
+*   if return==false, the output is printed
+*   Is base for printrc1 and printrc2
+*
+*****************************************************************{{{ */
+function printrcd($obj="",$comment='',$return=false) {
+  if($return) return(print_r($obj,true));
+  else {
+    print("<!--\n<pre>");
+    $comment != '' and print($comment."\n");
+    print_r($obj);
+    print("</pre>\n-->\n");
+  }
+} // END FUNCTION printrcd }}}
+
+/* ****************************************************************
+* @FUNCTION:   printversie() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function printversie($datum="", $str="", $script="" ) {
+  if(! $datum) $datum = VANDAAG ;
+  if(! $script) $script = basename($_SERVER['SCRIPT_NAME']);
+  echo "\n\n<!-- @".$script." $str vs: $datum -->\n\n";
+} // END FUNCTION printversie }}}
+
+/* ****************************************************************
+* @FUNCTION:   printerror() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function printerror($str) {
+  echo "\n\n<!-- FUNCTIONAL ERROR: \n".$str." -->\n\n";
+} // END FUNCTION printerror }}}
+
+/* ****************************************************************
+* @FUNCTION:   printdebug() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function printdebug($str) {
+  echo "\n\n<!-- DEBUG MSG: \n".$str." -->\n\n";
+} // END FUNCTION printdebug }}}
+
+/* ****************************************************************
+* @FUNCTION:   debugh() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function debugh($a="", $b="", $c="", $d="", $e=""  )  {
+    echo "DEBUG: <br />$a<br />\n $b<br />\n $c<br />\n $d<br />\n $e<br />\n <P>\n";
+} // END FUNCTION debugh }}}
+
+/* ****************************************************************
+* @FUNCTION:   debugn() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function debugn($a="", $b="", $c="", $d="", $e=""  )  {
+    echo "<!-- \n$a\n$b\n$c\n$d\n$e\n -->";
+} // END FUNCTION debugn }}}
+
+/* ****************************************************************
+* @FUNCTION:   debuge() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function debuge($a="", $b="", $c="", $d="", $e=""  )  {
+    echo "DEBUG: <br />$a<br />\n $b<br />\n $c<br />\n $d<br />\n $e<br />\n <P>\n";
+    exit;
+} // END FUNCTION debuge }}}
+
+/* ****************************************************************
+* @FUNCTION:   str haveapeek() 
+* @SYLLABUS: Return't een string met de explosie van een array/object/string en
+*   naar wens _GET etc. params.
+*
+*****************************************************************{{{ */
+function haveapeek($var='',$rest=true) {
+  $str="<pre style='margin-left:45px;'>\n";
+  if($var) {
+    $str.="VAR: ".print_r($var,true)."\n";
+  }
+  if($rest) {
+    $str.="GET: ".print_r($_GET,true);
+    $str.="POST: ".print_r($_POST,true);
+    $str.="COOKIE: ".print_r($_COOKIE,true);
+    $str.="SESSION: ".print_r($_SESSION,true);
+  }
+  $str.="</pre>\n\n";
+  return($str);
+} // END FUNCTION haveapeek }}}
+
+/* ****************************************************************
+* @FUNCTION:   is_email() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function is_email($em)  {
+  if ( ereg("^([0-9A-Za-z_\-]+)".
+            "([\.][0-9A-Za-z_\-]+)*".
+            "@".
+            "([0-9A-Za-z\-]+)".
+            "([\.][0-9A-Za-z\-]+)*".
+            "([\.][A-Za-z]{2,3})[\^]?$",
+             $em))  {
+    return(true);
+  }
+  else  {
+    return(false);
+  }
+} // END FUNCTION is_email }}}
+
+/* ****************************************************************
+* @FUNCTION:   showrecordnotavailable() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function showrecordnotavailable($a = "") {
+
+echo <<<EOF
+
+  <FORM method="POST"><INPUT TYPE="button" VALUE="<-------" onClick="history.go(-1);"></FORM>
+  <br /><br /><br /><br />
+  <center><font face="Verdana, Arial, Helvetica" color=RED size=3>
+    <strong>Record NIET (meer) beschikbaar ($a) </strong></font></center>
+
+  <center><font face="Verdana, Arial, Helvetica" color="FF0000" size=2>
+    <strong>Ga terug en doe een reload om de juiste stand van zaken te zien </strong></font></center>
+
+  <br /><br /><br /><br />
+
+EOF;
+
+} // END FUNCTION showrecordnotavailable }}}
+
+
+/**{{{
+* Bij onderstaande versie hoeft het $-teken niet noodzakelijkerwijs
+* direct na het %-teken te staan en kan ook verderop in het token staan
+
+function parsebody_ori($str) {
+  $mx = explode("%", $str);
+
+  while (list($header, $value) = each($mx))	{
+    if($tmp = strstr($value,'$'))  {
+      $tmp = substr($tmp,1);
+      $value = $GLOBALS[$tmp];
+    }
+    $body .= $value;
+  }
+
+  return(parseTypoLinks($body));
+}
+
+
+* Bij onderstaande versie moet het $-teken noodzakelijkerwijs
+* direct na het %-teken staan
+
+function parsebody_ori2($str) {
+  $mx = explode("%", $str);
+  $body = '';
+
+  while (list($header, $value) = each($mx))	{
+    if(preg_match("/^[$]/", $value)) {
+      $tmp = substr($value,1);
+      $value = $GLOBALS[$tmp];
+    }
+    $body .= $value;
+  }
+
+  return(parseTypoLinks($body));
+}
+}}}**/
+
+/* ****************************************************************
+* @FUNCTION:   parsebody() 
+* @SYLLABUS: 
+*   Vervang %$<var>% tokens uit een tekstblok door overeenkomende $GLOBALS[$<var>] values.
+*
+*   Deze versie is iets compacter dan de 2 vorige versie's maar zal iets meer processing
+*   nemen door 2 maal een parse van het tekstblok
+*
+*****************************************************************{{{ */
+function parsebody($str) {
+  preg_match_all("/%[$]([^%]+)%/", $str, $arr);
+  // gevonden tokens nu in $arr[0]               (vb: %$titel%)
+  // gevonden tekstitems in tokens nu in $arr[1] (vb: titel)
+
+  // Vervang de tekstitems in array door de values van de overeenkomende vars
+  // stop deze in een nieuw array
+  // Als een overeenkomende var niet gevonden wordt, print dan 2 at-signs als dummy
+  foreach($arr[1] AS $val) 
+    isset($GLOBALS[$val]) ? $arrnew[] = $GLOBALS[$val] : $arrnew[] = '@@';
+
+  // vervang de tokens in tekst door de tekstdelen in arrnew
+  // Typo3 quirck:
+  // stuur de output eerst door parseTypoLinks alvorens terug te geven
+  return(parseTypoLinks(str_replace($arr[0], $arrnew, $str)));
+
+} // END FUNCTION parsebody }}}
+
+/* ****************************************************************
+* @FUNCTION:   check_pagemem() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function check_pagemem($arr, $sep="|")  {
+// CHECK PAGEMEMORY
+  $pieces = explode($sep,$arr);
+  foreach(explode($sep,$arr) as $value) {
+    $tmp=explode("=",$value);
+    global ${$tmp[0]};
+    ${$tmp[0]} = $tmp[1];
+  //echo $tmp[0].", ".${$tmp[0]}."<br />";
+  }
+} // END FUNCTION check_pagemem }}}
+
+/* ****************************************************************
+* @FUNCTION:   no_cache() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function no_cache() {
+  Header("Pragma: no-cache");
+  Header("Cache-Control: no-cache, must-revalidate");
+} // END FUNCTION no_cache }}}
+
+/* ****************************************************************
+* @FUNCTION:   replacechar() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function replacechar($text,$mod=""){
+
+  $text=ereg_replace(Chr(34), "&quot;", $text);
+  $text=ereg_replace(Chr(39), "&#39;", $text);
+  $text=ereg_replace(Chr(60), "&lt;", $text);
+  $text=ereg_replace(Chr(62), "&gt;", $text);
+  if($mod == "1")  {
+    $text=ereg_replace(Chr(10), "&#10;", $text);
+    $text=ereg_replace(Chr(13), "&#13;", $text);
+  }
+  return ($text);
+} // END FUNCTION replacechar }}}
+
+/* ****************************************************************
+* @FUNCTION:   randomint() 
+* @SYLLABUS: 
+*   Genereer een random integer, te gebruiken als _sid
+*
+*****************************************************************{{{ */
+function randomint($max = 100000000) {
+
+  static $startseed = 0;
+
+  if (!$startseed)  {
+    $startseed = (double)microtime()*mt_getrandmax();
+    mt_srand($startseed);
+  }
+
+  return(mt_rand() % $max);
+
+} // END FUNCTION randomint }}}
+
+/* ****************************************************************
+* @FUNCTION:   formatInputBedrag() 
+* @SYLLABUS: 
+*   Formatteert een bedrag in een formaat waarin decimale/duizendtal punten en
+*   komma's staan en maakt daarvan een getal dat door programma's kan worden
+*   verwerkt die 12345.67 als input verwachten. Er zijn alleen inputbedragen
+*   valide die 0,1 of 2 decimalen achter een punt/komma hebben. Staan er 3 of
+*   meer cijfers als laatste van het bedrag dan wordt een evt. punt/komma die
+*   daarvoor staat behandeld als duizendseperator en valt dus weg in het
+*   eindresultaat.
+*   Voorbeelden:
+      -1234567890  -1234567890
+      1234567890    1234567890
+      123.456789     123456789
+      123,456789     123456789
+      123.4567.89   1234567.89
+      1.234.567,89  1234567.89
+      4.567,89         4567.89
+      123.4567,89   1234567.89
+      123,4567.890  1234567890
+      1234                1234
+      1234,5            1234.5
+      1234.5            1234.5
+      23,75              23.75
+      23.75              23.75
+*
+*****************************************************************{{{ */
+function formatInputBedrag($some_number) { 
+  $some_number = preg_replace("/[.,](\d{0,2})$/","|$1",$some_number);
+  $some_number = preg_replace("/[.,]/","",$some_number);
+  $some_number = preg_replace("/[|]/",".",$some_number);
+  return($some_number);
+} // END FUNCTION formatInputBedrag }}}
+
+/* ****************************************************************
+* @FUNCTION:   formatbedrag() 
+* @SYLLABUS: 
+*   FORMATTEERT EEN BEDRAG IN FORMAAT: nn.nnn.nnn,nn
+*
+*    $some_number: kan elk nummerformaat zijn
+*    $currency: false(default): print geen currency sign; true: print een currency sign
+*               de vorm en plaats van het currency sign wordt beinvloed door de setlocale setting
+*    $nul: false: als some_number='' wordt aangeboden dan wordt een '' teruggegeven
+*                          als een 0 wordt aangeboden, wordt een '' teruggegeven
+*          true(default): nu wordt '' omgezet naar 0 dat een geformatteerde 0,00 teruggeeft
+*          'space': een 0 nummer wordt teruggegeven als ''
+*
+*****************************************************************{{{ */
+function formatbedrag($some_number,$nul=true,$currency=false) { 
+  
+  if($nul == false) {
+    if($some_number == 0) return('');
+    else if($some_number == '') return('');
+  }
+  else if($nul == true) {
+    if($some_number == '') $some_number = 0;
+    else if($some_number == 0) $some_number = 0;
+  }
+    
+  $number = round($some_number,2);
+
+  # geen setlocale,                     resultaat: -123456789.00
+  # setlocale(LC_MONETARY, 'it_IT'); // resultaat: -EUR 123.456.789,00
+  # setlocale(LC_MONETARY, 'de_DE'); // resultaat: -123.456.789,00 EUR
+  # setlocale(LC_MONETARY, 'nl_NL'); // resultaat: EUR 123 456 789,00-
+
+  // attentie: money_format werkt niet op WIndows platforms
+  if (function_exists('money_format')) {
+    if($currency) {
+      setlocale(LC_MONETARY, 'nl_NL'); // resultaat: EUR 123 456 789,00-
+      return(money_format('%.2n',$number)); // resultaat: -EUR 123.456.789,00
+    }
+    else {
+      setlocale(LC_MONETARY, 'de_DE'); // resultaat: -123.456.789,00 EUR
+      return(money_format('%!.2n',$number)); // resultaat: -123.456.789,00
+    }
+  }
+  else return(sprintf("%0.2f", round($some_number,2)));
+} // END FUNCTION formatbedrag }}}
+
+
+/* ****************************************************************
+* @FUNCTION:   bedrag() 
+* @SYLLABUS: 
+*     combineert formatbedrag(formatInputBedrag($some_number), [false], [true])
+*     Indien currency wordt een EUR teken vooraf meegegeven.
+*
+*****************************************************************{{{ */
+function bedrag($some_number,$nul=false,$currency=true) { 
+  $result = formatbedrag(formatInputBedrag($some_number), $nul);
+  if($currency && $result)
+    return('€ '.$result);
+  else
+    return($result);
+} // END FUNCTION bedrag }}}
+
+
+/* ****************************************************************
+* @FUNCTION:   goto_pagina() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function  goto_pagina($pad) {
+
+  !empty($GLOBALS['servertype']) ?
+    $servertype = $GLOBALS['servertype'] :
+    $servertype = "";
+
+  switch($servertype) {
+    case "IIS"    : echo "<script language='JavaScript'>"
+                        ."location.replace('$pad');"
+                        ."</script>";
+                    break;
+    case "Apache" :
+    case "PWS"    : 
+    default       : header("Location: $pad");
+                    break;
+  }
+
+  exit;
+} // END FUNCTION goto_pagina }}}
+
+/* ****************************************************************
+* @FUNCTION:   reload_former() 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+function reload_former()  {
+
+  echo "<SCRIPT Language=Javascript>
+          window.opener.location.reload();
+          window.close();
+        </SCRIPT>";
+  exit;
+
+} // END FUNCTION reload_former }}}
+
+/* ****************************************************************
+* @FUNCTION:   arrprint() 
+* @SYLLABUS: 
+*   testprint een array
+*   Dit heeft niet zoveel zin, is hetzelfde als print_r
+*
+*****************************************************************{{{ */
+function arrprint($arr) {
+  static $i = 0;
+
+  if(is_array($arr)) {
+    foreach($arr AS $key=>$val)  {
+      switch($i) {
+        case 0 : print("[".$key."] - [".$val."]<br />\n"); break;
+        case 1 : print(" : [".$key."] - [".$val."]<br />\n"); break;
+        case 2 : print("&nbsp;&nbsp; : [".$key."] - [".$val."]<br />\n"); break;
+      }
+      if(is_array($val)) {
+        $i++;
+        arrprint($val);
+      }
+    }
+    $i = 0;
+  }
+  print("<br />\n");
+
+} // END FUNCTION arrprint }}}
+
+/* ****************************************************************
+* @FUNCTION:   methodsprint() 
+* @SYLLABUS: 
+*   testprint de methods van een object
+*
+*****************************************************************{{{ */
+function methodsprint(&$obj) {
+
+  if(is_object($obj))
+    foreach(get_class_methods($obj) as $k=>$v) 
+      print("[$k] => [$v]<br />\n");
+  print("<br />\n");
+
+} // END FUNCTION methodsprint }}}
+
+/*******************************************************************************
+***  BELOW THE FUNCTIONS OF _commandline.lib
+*******************************************************************************/
+
+/* ****************************************************************
+* @FUNCTION:   printn() 
+* @SYLLABUS: 
+*   performs printing with a newline (CGI version)
+*
+*****************************************************************{{{ */
+function printn($str="") {
+  echo "$str\n";
+} // END FUNCTION printn }}}
+
+/* ****************************************************************
+* @FUNCTION:   printnn() 
+* @SYLLABUS: 
+*   performs printing with double newlines (CGI version)
+*
+*****************************************************************{{{ */
+function printnn($str="") {
+  echo "\n$str\n\n";
+} // END FUNCTION printnn }}}
+
+/* ****************************************************************
+* @FUNCTION:   print_d() 
+* @SYLLABUS: 
+*   performs debug printing with a newline
+*
+*****************************************************************{{{ */
+function print_d($arr) {
+  print ("\n");
+  print_r($arr);
+  print ("\n");
+} // END FUNCTION print_d }}}
+
+// FILE FUNCTIES
+
+/* ****************************************************************
+* @FUNCTION:   fopena() 
+* @SYLLABUS: 
+*   opens file in append mode or Die
+*
+*****************************************************************{{{ */
+function fopena($str="") {
+  if (!($fp = fopen($str, "a")))
+    die("could not open for append file: $str");
+  else
+    return($fp);
+} // END FUNCTION fopena }}}
+
+/* ****************************************************************
+* @FUNCTION:   fopenw() 
+* @SYLLABUS: 
+*   opens file in write mode or Die
+*
+*****************************************************************{{{ */
+function fopenw($str="") {
+  if (!($fp = fopen($str, "w")))
+    die("could not open for write file: $str");
+  else
+    return($fp);
+} // END FUNCTION fopenw }}}
+
+/* ****************************************************************
+* @FUNCTION:   fopenr() 
+* @SYLLABUS: 
+*   opens file in read mode or Die
+*
+*****************************************************************{{{ */
+function fopenr($str="") {
+  if (!($fp = fopen($str, "r")))
+    die("could not open for read file: $str");
+  else
+    return($fp);
+} // END FUNCTION fopenr }}}
+
+/* ****************************************************************
+* @FUNCTION:   expand_argv() 
+* @SYLLABUS: 
+*   Zoek uit welke parameters op de commandline zijn meegegeven
+*   het gaat hier alleen om parameters die beginnen met twee dashes
+*   de namen van de argumenten worden variabelen in het script
+*   indien een waarde bij een parameter hoort dan bevat de 
+*   variabele die waarde, anders bevat de variabele 'true'
+*
+*   de volgende parameters moeten een argument meekrijgen
+*     (granted With Arguments)
+*   $grantedwa = array("--catalogus", "--mtime", "--poedel");
+*
+*   de volgende parameters zijn switches (dus zonder argument)
+*   $grantedws = array("--help", "--mtime");
+*
+*   Function to get commanline parameters with 2 dashes
+*   into global variables.
+*   The resulting global variables have the name of the
+*   commandline parameter without the dashes and with the prefix  A_
+*   so the commanline argument '--mtime 500' turns into
+*   the global variable A_mtime=500.
+*
+*   EXPECTS: 
+*     the commandline array argv (is in $_SERVER['argv'])
+*     an array with arguments expected to have a value, these will be
+*       turned into variables with the values (arguments with dashes --argument)
+*     an array with arguments meant as switches, these will be set 
+*       true if they exist on the commandline (arguments with dashes --argument)
+*
+*   RESULT:
+*     all the resulting variables as globals with prefix A_
+*
+*****************************************************************{{{ */
+function expand_argv($argv, $grantedwa="", $grantedws="") {
+
+  if(! is_array($grantedwa) ) $grantedwa = array("");
+  if(! is_array($grantedws) ) $grantedws = array("");
+
+  foreach($argv AS $val)
+    if(ereg("^--", $val))  // is parameter
+      if(in_array($val, $grantedwa))  // toegestande parameter met argument
+        $args[] = $val;
+      else if(in_array($val, $grantedws)) { // toegestande parameter als switches
+        $label = "A_".ereg_replace("-", "", $val);
+        global $$label;
+        $$label = true;
+      }
+
+//  arrprint($args);
+
+  if(isset($args) && is_array($args) ) {
+
+    foreach($args AS $arg) {  // zoek de waarden bij de parameters
+
+      $name = "A_".ereg_replace("[-]", "", $arg);
+      $val = $argv[array_search($arg, $argv) + 1];
+      if(! ereg("^[-]", $val) ) {
+        $str1 = "De gevonden waarde bij ".$name." is: $val";
+        global $$name;
+        $$name = $val;
+      }
+      else {
+        $str2 = "Er is geen of een verkeerde waarde ($val) bij ".$name." gevonden.";
+        global $$name;
+        $$name = "";
+      }
+
+      if(! empty($str2))
+        printn($str2);
+
+    }
+
+  }
+
+} // END FUNCTION expand_argv }}}
+
+/*******************************************************************************
+***  END _global.lib AND _commandline.lib
+******************************************************************************}}} */
+
+
+/* ****************************************************************
+* @LIB:      _date.lib 
+* @CLASS:    DateConnector()
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+function datumPlus1($isoDatum) {
+  //$theArray = explode("-", $isoDatum);
+  //return ($theArray[0]."-".$theArray[1]."-".($theArray[2] + 1));
+
+  // nieuwe methode hieronder. De bovenste methode geeft verkeerde data zoals 30 februari of 32 januari
+  $timer = new DateConnector();
+  return($timer->unix2iso($timer->shuffle("iso",$isoDatum,1)));
+}
+
+Class DateConnector {
+  var $dbasetime, $time_start;
+  var $dateIso, $dateUnix, $dateDbase, $dateEurope, $dateUs, $dateHuman;
+
+  // CONSTRUCTOR
+  function DateConnector($stat="") {
+    if($stat == 1)
+      $this->startTimer();
+    // init datevars
+    $this->sysdatum = time() ;
+    $this->now = date("d-M-Y", $this->sysdatum);
+    $this->vandaag = date("d-m-Y", $this->sysdatum) ;
+    $this->vandaagIso = date("Y-m-d", $this->sysdatum) ;
+    $this->jaar = date("Y", $this->sysdatum) ;
+    $this->maand = date("n", $this->sysdatum) ; // maandnummer zonder voorloopnul, met voorloopnul is formatter 'm'
+    $this->maandvol = date("m", $this->sysdatum) ; // maandnummer zonder voorloopnul, met voorloopnul is formatter 'm'
+    $this->tijd = date("H:i:s", $this->sysdatum) ;
+    $this->tijd_kort = date("H:i", $this->sysdatum) ;
+    $this->isodate = $this->vandaagIso." ".$this->tijd;
+    $this->maildate = date("r", $this->sysdatum) ;
+    // maildate is rfc-date in the form of: Fri, 23 Jul 2004 21:34:23 +0200 (CEST)
+  } // END CONSTRUCTOR
+      
+
+  /*
+  * @METHOD:   mysqltime()
+  * @RETURNS:  str "2005-12-04 11:10:37"
+  * @SYLLABUS: Vraag de huidige tijd op in MySQL formaat
+  */
+  function mysqltime()  {
+    return(mysql_result(mysql_query("SELECT NOW()"),0));
+  }
+
+
+  // DATUMFORMAT VERANDERINGEN
+
+  /*
+  * @METHOD:   norm2iso(<str "04-12-2005"|"2005-12-04"|"">, [int 0])
+  * @RETURNS:  str "2005-12-04"|"0000-00-00"|""
+  * @SYLLABUS: Verander een europese datum (numeriek) naar isodatum
+  *   Controleer eerst of de aangeboden datum al een eur datum is en geef dan
+  *   direct terug. Maak anders van de aaneboden iso datum een eur datum.
+  *   Aan deze functie mag dus zowel een iso datum als een eur datum worden aangeboden.
+  */
+  function norm2iso($datum, $nul=0)  {
+    if(preg_match("/[\d]{4}-[\d]{2}-[\d]{2}/", $datum)) {
+      return($datum);
+    }
+    else if($datum == "") {
+      if($nul == 0) return("");
+      else  return("0000-00-00");
+    }
+    else {
+      $arr = explode("-",$datum);
+      return($arr[2]."-".$arr[1]."-".$arr[0]);
+    }
+  }
+
+  
+  /*
+  * @METHOD:   norm2unix(<str "04-12-2005">)
+  * @RETURNS:  int 1133650800
+  * @SYLLABUS: Verander een europese datum naar unixdatum.
+  *   De '-' separator in de aangeleverde datum mag 1 van volgende tekens zijn:
+  *   [SPACE] - / , | : +
+  */
+  function norm2unix($datum) {
+    return(strtotime($this->norm2iso(preg_replace("/[ -\/,|:+]/", "-", $datum))));
+  }
+
+  
+  /*
+  * @METHOD:   norm2unix(<str "2005-12-04">)
+  * @RETURNS:  int 1133650800
+  * @SYLLABUS: Verander een iso datum naar unixdatum.
+  *   De '-' separator in de aangeleverde datum mag 1 van volgende tekens zijn:
+  *   [SPACE] - / , | : +
+  */
+  function iso2unix($datum) {
+    return(strtotime(preg_replace("/[ -\/,|:+]/", "-", $datum)));
+  }
+
+  // VERANDER EEN ISODATUM NAAR EUROPESE DATUM (NUMERIEK)
+  // Controleer eerst of de aangeboden datum al een iso datum is en geef dan
+  // direct terug. Maak anders van de aaneboden eur datum een iso datum.
+  // Aan deze functie mag dus zowel een eur datum als een iso datum worden aangeboden.
+  function iso2norm($datum,$nul = 0)  {
+    if(preg_match("/[\d]{2}-[\d]{2}-[\d]{4}/", $datum)) 
+      return($datum);
+    $arr = explode("-",$datum);
+    if($nul == 0 )  {
+      if($arr[0] != "0000" && $arr[0] != "") {
+        return("{$arr[2]}-{$arr[1]}-{$arr[0]}");
+      }
+      else  {
+        return("");
+      }
+    }
+    else  {
+      return("{$arr[2]}-{$arr[1]}-{$arr[0]}");
+    }
+  }
+
+  // VERANDER EEN ISODATUM-TIJD NAAR EUROPESE DATUM (NUMERIEK)
+  // 2006-01-28 12:03:24 -> 28-01-2006 12:03:24
+  // of (strip=true)
+  // 2006-01-28 12:03:24 -> 28-01-2006
+  function isofull2norm($datum,$nostrip=0,$nul=0)  {
+    $ar1 = explode(" ",$datum);
+    $ar2 = explode("-",$ar1[0]);
+    if($nul == 0 )  {
+      if($ar2[0] != "0000" && $ar2[0] != "") {
+        if($nostrip) { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]} $ar1[1]"); }
+        else         { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]}"); }
+      }
+      else  {
+        return("");
+      }
+    }
+    else  {
+      if($nostrip) { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]} $ar1[1]"); }
+      else         { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]}"); }
+    }
+  }
+
+
+  // VERANDER EEN EURDATUM-TIJD NAAR ISO DATUM (NUMERIEK)
+  // 30-01-2006 12:03:24 -> 2006-01-30 12:03:24
+  // of (strip=true)
+  // 30-01-2006 12:03:24 -> 2006-01-30
+  function normfull2iso($datum,$nostrip=0,$nul=0)  {
+    $ar1 = explode(" ",$datum);
+    $ar2 = explode("-",$ar1[0]);
+    if($nul == 0 )  {
+      if($ar2[2] != "0000" && $ar2[0] != "") {
+        if($nostrip) { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]} $ar1[1]"); }
+        else         { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]}"); }
+      }
+      else  {
+        return("");
+      }
+    }
+    else  {
+      if($nostrip) { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]} $ar1[1]"); }
+      else         { return("{$ar2[2]}-{$ar2[1]}-{$ar2[0]}"); }
+    }
+  }
+
+
+  // VERANDER EEN ISODATUM NAAR EUROPESE DATUM (TEKSTUEEL)
+  function iso2tekst($datum,$nul = 0)  {
+    $arr = explode("-",$datum);
+    if($nul == 0 )  {
+      if($arr[0] != "0000" && $arr[0] != "") {
+        if(preg_match("/[1-9]{1}/", $arr[1])) $arr[1] = "0".$arr[1];
+        if(preg_match("/[0][1-9]{1}/", $arr[2])) $arr[2] = $arr[2][1];
+        switch($arr[1]) {
+          case "01" : $arr[1]="januari"; break;
+          case "02" : $arr[1]="februari"; break;
+          case "03" : $arr[1]="maart"; break;
+          case "04" : $arr[1]="april"; break;
+          case "05" : $arr[1]="mei"; break;
+          case "06" : $arr[1]="juni"; break;
+          case "07" : $arr[1]="juli"; break;
+          case "08" : $arr[1]="augustus"; break;
+          case "09" : $arr[1]="september"; break;
+          case "10" : $arr[1]="oktober"; break;
+          case "11" : $arr[1]="november"; break;
+          case "12" : $arr[1]="december"; break;
+        }
+        return("{$arr[2]} {$arr[1]} {$arr[0]}");
+      }
+      else  {
+        return("");
+      }
+    }
+    else  {
+      return("{$arr[2]}-{$arr[1]}-{$arr[0]}");
+    }
+  }
+
+  // VERANDER EEN UNIXDATUM NAAR EUROPESE DATUM
+  function unix2norm($datum,$nul = 0)  {
+    return ( date("d-m-Y",$datum));
+  }
+
+  // VERANDER EEN UNIXDATUM NAAR ISO DATUM
+  function unix2iso($datum,$nul = 0)  {
+    return ( date("Y-m-d",$datum));
+  }
+
+  // VERANDER EEN UNIXDATUM NAAR EUROPESE DATUM (TEKSTUEEL)
+  function unix2tekst($datum,$nul = 0)  {
+    return($this->iso2tekst(date("Y-m-d",$datum)));
+  }
+
+  // VERANDER EEN UNIXDATUM NAAR EUROPESE DATUM LANG FORMAAT (TEKSTUEEL)
+  function unix2tekstLong($datum,$nul = 0)  {
+    $str  = $this->day2dag(date("D",$datum));
+    $str .= date("j",$datum);
+    $str .= $this->int2maand(date("n",$datum));
+    $str .= date("Y",$datum);
+    return($str);
+  }
+
+  // VERANDER DAY NAAR DAG (TEKSTUEEL)
+  function day2dag($p) {
+    switch ($p) {
+      case 'Mon' : $i = "Maandag"  ; break;
+      case 'Tue' : $i = "Dinsdag"  ; break;
+      case 'Wed' : $i = "Woensdag" ; break;
+      case 'Thu' : $i = "Donderdag"; break;
+      case 'Fri' : $i = "Vrijdag"  ; break;
+      case 'Sat' : $i = "Zaterdag" ; break;
+      case 'Sun' : $i = "Zondag"   ; break;
+      }
+    return($i);
+  }
+
+  // VERANDER MAAND (TEKSTUEEL) NAAR INT
+  function maand2int($p) {
+    switch ($p) {
+      case 'Jan' : $i = 1; break;
+      case 'Feb' : $i = 2; break;
+      case 'Mar' : $i = 3; break;
+      case 'Apr' : $i = 4; break;
+      case 'May' : $i = 5; break;
+      case 'Jun' : $i = 6; break;
+      case 'Jul' : $i = 7; break;
+      case 'Aug' : $i = 8; break;
+      case 'Sep' : $i = 9; break;
+      case 'Oct' : $i = 10; break;
+      case 'Nov' : $i = 11; break;
+      case 'Dec' : $i = 12; break;
+      }
+    return($i);
+  }
+
+  // VERANDER INT NAAR MAAND (TEKSTUEEL)
+  function int2maand($p) {
+    switch ($p) {
+      case 1:  $i = "januari"; break;
+      case 2:  $i = "februari"; break;
+      case 3:  $i = "maart"; break;
+      case 4:  $i = "april"; break;
+      case 5:  $i = "mei"; break;
+      case 6:  $i = "juni"; break;
+      case 7:  $i = "juli"; break;
+      case 8:  $i = "augustus"; break;
+      case 9:  $i = "september"; break;
+      case 10: $i = "oktober"; break;
+      case 11: $i = "november"; break;
+      case 12: $i = "december"; break;
+      }
+    return($i);
+  }
+
+
+  // VOER EEN BENOEMD DATUMFORMAAT IN EN VUL EEN AANTAL
+  // CLASSPARMS MET DATUMSOORTEN. DE FUNCTIE WORDT AANGEROEPEN
+  // MET date EN mod DIE VERTELT WELKE VORM date HEEFT
+  // Als plainunix aanstaat worden de verschillende formaten niet aangemaakt.
+  // Dit wordt min of meer gebruikt icm berekeken, dus als data berekend moeten
+  // worden maar niet in een ander formaat nodig zijn.
+  function shuffle($mod='unix',$date='',$bereken=0,$plainunix=false) {
+    if(!$date) $date = time();
+    // breng alle aangeboden datums terug naar standaard unixtime
+    // als gevolg hiervan staan een aantal objectvars klaar met daarin
+    // een geformatteerde datum op basis van die unixtime.
+    // $mod bevat een indicator (het format) van $date; zie 'switch' voor types
+    // Als 'bereken' is ingevuld wordt de datum met 'bereken'dagen verhoogd.
+    if($mod == "unix") {
+      $tmp = $date;
+    } 
+    else {
+      $x = explode("/", ereg_replace("[ -/,|:\\+]", "/", $date) );
+      // int mktime (int hour, int minute, int second, 
+      //             int month, day, year [, int is_dst])      
+      switch($mod) {
+        case "iso"     : $tmp = mktime(0,0,0,$x[1],$x[2],$x[0]); break;  // 2001-12-31
+        case "europe"  : $tmp = mktime(0,0,0,$x[1],$x[0],$x[2]); break;  // 31-12-2001
+        case "us"      : $tmp = mktime(0,0,0,$x[0],$x[1],$x[2]); break;  // 12-31-2001
+        case "dbase"   : $tmp = mktime(0,0,0,$x[1],$x[2],$x[0]); break;  // 2001-12-31
+      }
+    }
+    // moet er iets aan dagen worden opgeteld, gebruik hiervoor mktime omdat
+    // het domweg optellen en verminderen van dagseconden leidt tot fouten
+    // indien zomertijd etc.
+    // if($bereken) $tmp += ($bereken * 86400); // = (24*60*60) ofwel 1 etmaal
+    if($bereken) {
+      $tmp = mktime(0,0,0,date("m",$tmp), date("d",$tmp)+$bereken, date("Y",$tmp));
+    }
+    $this->dateUnix = $tmp;
+    // indien niet plainunix, format de unixdatum naar verschillende formaten
+    if(!$plainunix) {
+      $this->dateIso = date("Y-m-d", $tmp);
+      $this->dateIsoFull = date("Y-m-d h:i:s", $tmp);
+      $this->dateDbase = date("Y-m-d", $tmp);
+      $this->dateEurope = date("d-m-Y", $tmp);
+      $this->dateDutch = $this->unix2tekstLong($tmp);
+      $this->dateUs = date("m-d-Y", $tmp);
+      $this->dateHuman = date("l j F, Y", $tmp);
+    }
+    return($this->dateUnix);
+  }
+
+
+  function shuffleClear() {
+    // wist de datums in D_shuffle
+    $this->dateIso = "";
+    $this->dateIsoFull = "";
+    $this->dateUnix = "";
+    $this->dateDbase = "";
+    $this->dateEurope = "";
+    $this->dateDutch = "";
+    $this->dateUs = "";
+    $this->dateHuman = "";
+  }
+
+  // RETURNS MICROTIME
+  // USED FOR TIMING AS IN:
+  //  $time_start = getmicrotime();
+  //  print( getmicrotime() - $time_start ."\n");
+  //
+  function getmicrotime() {
+    list($usec, $sec) = explode(" ",microtime());
+    return ((float)$usec + (float)$sec);
+  }
+
+  function startTimer() {
+    $this->time_start = $this->getmicrotime();
+  }
+  
+  function endTimer($style = "") {
+    if($style == "flat" || $style == "text") {
+      print($this->getmicrotime() - $this->time_start ."\n");
+    }
+    else {
+      print("<p style=\"font-family: 'Verdana,Arail,Helvetica,Sans Serif'; color: gray; font-size: 0.6em;\">");
+      print($this->getmicrotime() - $this->time_start ."<br />\n");
+      print("</p>");
+    }
+  }
+
+} // END CLASS DateConnector
+
+$timer = new DateConnector(1);
+
+//reflection_class::export('DateConnector');
+
+/*******************************************************************************
+***  END _date.lib
+******************************************************************************}}} */
+
+
+/* ****************************************************************
+* @LIB:      _logging.lib
+* @CLASS:    Logger()
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+/*
+  
+  Program   : Common PHP Librarys
+  Module    : _logging.lib  
+  Date      : 2003-02-04
+  Revision  : 1.0
+  Copyright : ML design & techniek 
+  Author(s) : Frank Kooger
+  
+  SYNOPSIS  : 
+  
+    A class for handling logfiles and writing logrecords. The class
+    handles logfiles with max. logsizes and makes a backup of the old
+    logfile is its max. size is reached. A timer can be set which logs
+    how long the procedure took to finish.
+
+    With this class it's very easy to simultaniously write more than 
+    one logfile f.e.:
+    
+    $log      = new Logger();
+    $errlog   = new Logger("error.log", "400.000", 2);
+    $debuglog = new Logger("debug.log", "", 4, "new");
+    
+    $log->p("logtext");
+    $errorlog->p("errortext");
+    $debuglog->p("debugtext");
+    
+
+  SYNTAX:
+
+    $log = new Logger( 
+                        [str logfilename], 
+                        [str logfilesize], 
+                        [str loglevel], 
+                        [str fileaction], 
+                        [str format] 
+                      )
+  
+
+    logfilename, logfilesize, loglevel:
+                      
+      The following parameters are checked at constructiontime, so
+      these can be set in a config file or procedure (in order of appearance):
+
+        $config->data['logfile']
+        $config->data['logsize']
+        $config->data['loglevel']
+        $config->data['mailto']
+
+      next:
+
+        $config->data['log']['file']
+        $config->data['log']['size']
+        $config->data['log']['level']
+        $config->data['log']['mailto']
+
+      Next the following CONSTANTS are being cheched, so these overrule
+      the GLOBALS params if set:
+
+        LOGFILE
+        LOGSIZE
+        LOGLEVEL
+        MAILTO
+
+      next:
+
+        $GLOBALS['logfile']
+        $GLOBALS['logsize']
+        $GLOBALS['loglevel']
+        $GLOBALS['mailto']
+
+      These can be overriden by the optional construction parameters:
+
+        new Logger( logfile, logsize, loglevel, ...)
+
+      If none are set these parameters default to:
+
+        this->logfile  = "default.LOG"
+        this->logsize  = 0 (no limit)
+        this->loglevel = 2
+        
+      ! NOTE: whatever comes first, is first !
+
+    fileaction:
+
+      'fileaction' can have the values: 'append' (new logitems are appended
+      to the logfile '$this->logfile') or 'new' (during construction
+      '$this->logfile' is newly created). 'fileaction' defaults to
+      'append'.
+      
+    format:
+
+      'format' can have the values:
+        "" (empty) defaults to "plain"
+        anything not equal to "plain" for example "witheader"
+      In the first case no logheader is written to the logfile. 
+      In the latter case a logheader is written when a logger object
+      is initiated.
+      'format' defaults to "plain".
+
+
+    USAGE:
+
+    constructor:
+
+      $log = new Logger("", "", "3", "new", "header");
+
+        // A new logfile is written. 'logfilename' and 'logfilesize' are
+        // read from the GLOBALS 'logfile' and 'logsize'. If these are not
+        // set these values default to 'logfilename="default.LOG"' and
+        // 'logfilesize=0' (no sizelimit). The loglevel is set to 3. 
+        // A logheader and footer is written into the logfile (unless the
+        // last param equals to "" or "plain".  A loglevel 3
+        // means that every logrecord with a level 1, 2 or 3 (or a
+        // logrecord without a loglevel, for this defaults to 3) is
+        // written into the logfile. 
+      
+      $log = new Logger();
+
+        // The default logfile or the GLOBALS 'logfile' is openened for
+        // appending.
+
+
+    timer-function:
+
+      $log->startTimer();
+
+        // starts the timer; writes the durationtime in the logtail.
+
+
+    logging: 
+      
+      $log->p("logtext" [, loglevel]); 
+      $log->s("logtext" [, loglevel]); 
+      $log->so("logtext" [, loglevel]); 
+
+        // log the line 'logtext' with default loglevel
+        // If no loglevel is given, the default loglevel is asumed, so a
+        // logrecord without a loglevel will allways be written.
+        
+        // log->s simoultaniously writes the logtext to the screen.
+        // log->so writes the logtext to the screen only.
+
+      $log->p("logtext", 2); 
+
+        // log 'logtext' with loglevel 2
+        // If the loglevel is set to 2, the record will be written if the
+        // default loglevel is 2 or higher.
+
+      $log->p("\nlogtext\n", 2); 
+
+        // log 'logtext' with loglevel 2; write an
+        // empty line before and after the logrecord.
+
+      $log->p("logtext", 1); 
+
+        // log 'logtext' with loglevel 1. Using
+        // loglevel 1 a warningemail is created if the global parameter
+        // $GLOBAL['mailto'] is set.
+      
+
+    stop logging:
+
+      $log->close();
+
+        // writes the logtail and timer (if set) and closes the logfile;
+
+      $log->quit();
+
+        // closes the logfile immediatly without writing logtail and
+        // timer;
+
+
+    CHANGELOG :
+
+      2003-02-05, 1.0; first operational version
+
+
+    TODO:
+
+      The maxlogsize is only checked at construction time. If a procedure
+      lasts a long time during which a lot of logrecords are written the
+      logfile can grow beyond its maximum. There has to be a
+      filesizecheck every 50 logrecords or so.
+
+      A new logfile can only be created in existing directorys. There
+      should be a procedure to create a directory-tree if the directory
+      doesn't exist yet.
+
+*/
+
+
+// MAIN CLASS
+
+Class Logger{
+  var $loglevel, $logfile, $fileaction, $logsize, $mailto, $debug;
+  var $time_start;
+
+
+  function Logger(   $logfile  = "", 
+                     $logsize  = "", 
+                     $loglevel = "", 
+                     $action   = "append", 
+                     $format   = "plain"        
+                  )                       { // CONSTRUCTOR
+    
+    $this->logfile  = $this->setParms($logfile, "logfile");
+    $this->logsize  = $this->setParms($logsize, "logsize");
+    $this->loglevel = $this->setParms($loglevel, "loglevel");
+
+    $this->mailto   = $this->setParms("", "mailto");
+
+    // set action: append (default) appends to logfile
+    //             clean writes a new logfile everytime
+    if( preg_match("/clean|write|new/i", $action ) ) $this->fileaction = "w";
+    else                                             $this->fileaction = "a";
+
+    // set format
+    $this->format = $format;
+
+//    debugn("Results of Logger", $this->logfile, $this->logsize, $this->fileaction, $this->loglevel);
+    if($this->openlogfile()) {
+      if($this->format != "plain") 
+        $this->logheader($this->loglevel);
+    }
+    else
+      return(false);
+
+  } // END CONSTRUCTOR Logger
+  
+    
+  // BEPAAL DE INPUT PARAMTERS
+  // MAAK EEN KEUZE UIT (IN VOLGORDE):
+  // invoer met de methode-aanroep
+  // beschikbaar zijn van config->data parms
+  // beschikbaar zijn van globale parms
+
+  function setParms($methodparm, $type) {
+    global $config;
+    $tmp = false;
+
+    switch($type) {
+      
+      case "logfile"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['logfile'])) return($config->data['logfile']);
+        else if(! empty($config->data['log']['file'])) return($config->data['log']['file']);
+        else if(defined("LOGFILE")) return(LOGFILE);
+        else if(! empty($GLOBALS['logfile'])) return($GLOBALS['logfile']);
+        else return("default.LOG");
+        break;
+      case "logsize"   :
+             if(! empty($methodparm)) $tmp = $methodparm;
+        else if(! empty($config->data['logsize'])) $tmp = $config->data['logsize'];
+        else if(! empty($config->data['log']['size'])) $tmp = $config->data['log']['size'];
+        else if(defined("LOGSIZE")) $tmp = LOGSIZE;
+        else if(! empty($GLOBALS['logsize'])) $tmp = $GLOBALS['logsize'];
+        else $tmp = 0;
+        $tmp = preg_replace("/[^0-9]/", "", $tmp );
+        return($tmp);
+        break;
+      case "loglevel"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['loglevel'])) return($config->data['loglevel']);
+        else if(! empty($config->data['log']['level'])) return($config->data['log']['level']);
+        else if(defined("LOGLEVEL")) return(LOGLEVEL);
+        else if(! empty($GLOBALS['loglevel'])) return($GLOBALS['loglevel']);
+        else return(2);
+        break;
+      case "mailto"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['mailto'])) return($config->data['mailto']);
+        else if(! empty($config->data['log']['mailto'])) return($config->data['log']['mailto']);
+        else if(defined("MAILTO")) return(MAILTO);
+        else if(! empty($GLOBALS['mailto'])) return($GLOBALS['mailto']);
+        else return("");
+        break;
+      default         :
+        break;
+
+    } // end switch
+
+  } // END FUNCTION setParms
+
+   
+  // OPEN LOGFILE
+
+  function openLogfile() {
+
+    if ($this->loglevel > 0) {
+
+      $File = new Filewrapper;
+
+      // check if logfile exists and hasn't reached logfilesize; 
+      // else make copy.
+
+      // Before we do a checklogsize, the file must exist.
+      // is_sane(name, must_exist, no_symlink, no_dir)
+
+      if(! $File->is_sane($this->logfile,1,0,1)) {
+        if (!($this->fp = fopen($this->logfile, "w"))) {
+          die("0. could not write new logfile: {$this->logfile}");
+        }
+        else {
+          return(true);
+        }
+      }
+
+      if(! $this->logsize) {  // no logsize limit
+        if (!($this->fp = fopen($this->logfile, $this->fileaction))) 
+          die("1. could not open logfile: {$this->logfile}");
+      }
+      else if(filesize($this->logfile) > $this->logsize) {
+              // logfilesize reached
+        $File->copy_file ($this->logfile, $this->logfile.".old");
+        if (!($this->fp = fopen($this->logfile, "w"))) 
+          die("could not write new logfile after backup old one");
+      }
+      else {  // logsizelimit not reached yet
+        if (!($this->fp = fopen($this->logfile, $this->fileaction))) 
+          die("2. could not open logfile: {$this->logfile}");
+      }
+
+      return(true);
+
+    }
+
+    return(false);
+
+  } // END FUNCTION openLogfile
+
+
+  /** FUNCTION changeLogs
+  * Closes logfile in use and opens new one
+  */
+  function changeLogs($new='') {
+    if(! $new) return(false);
+    $this->flush();
+    $this->quit();
+    $this->logfile = $new;
+    $this->openLogfile();
+  } // END FUNCTION changeLogs
+
+
+  // PRINT LOGHEADER
+  function logheader($level)  {
+    $stamp = date("Y-m-d H:i:s",time());
+    $str  =<<<EOT
+
+== Start_logrecord: {$stamp} =================================[{$level}]
+EOT;
+
+    $this->prn($str);
+  }
+    
+
+  // WRAPPERS TO PRINTFUNCTIE
+  
+  // DOESN'T SIMALTANIOUSLY WRITE TO SCREEN
+
+  function p($str = "", $level = "") {
+    return( $this->prn($str, $level) );
+  }
+
+  // DOES WRITE SIMALTANIOUSLY TO SCREEN
+
+  function s($str = "", $level = "") {
+    $this->so($str, $level);
+    $this->prn($str, $level);
+  } 
+  
+  // END OF WRAPPER TO PRINTFUNCTIE
+
+
+  // PRINTFUNCTIE
+  
+  function prn($str = "", $level = "") {
+
+    if($level == "") $level = $this->loglevel;
+
+    if($this->format != "plain") 
+      $str = "[{$level}] " . $str;
+
+    if($level <= $this->loglevel) {
+      fwrite($this->fp, $str."\n");
+      if($this->debug) print($str."\n");
+    }
+
+    if($level == 1 && $this->mailto != "") { // send mail
+      $subject = "FoutBericht van logger - ".date("d-M-Y H:i:s", time());
+      $message = "\n\nMessage: \n\n$str\n\n";
+      mail($this->mailto, $subject, $message,
+       "From: ErrorLogging@{$_ENV['HOSTNAME']}");
+      if($this->loglevel > 0) 
+        fwrite($this->fp, "sending mail     : <{$this->mailto}>  $subject");
+    }
+
+  } // END FUNCTION prn()
+
+
+  // WRITES TO SCREEN ONLY
+
+  function so($str = "", $level = "") {
+
+    if($level == "") $level = $this->loglevel;
+
+    if($this->format != "plain") 
+      $str = "[{$level}] " . $str;
+
+    if($level <= $this->loglevel) {
+      print("\n".$str."\n\n");
+    }
+
+  } // END OF WRITE ONLY TO SCREEN
+
+
+  // FUNCTION FLUSH
+  function flush() {
+    if($this->fp) fflush($this->fp);
+  } // END FUNCTION flush
+
+
+  // FUNCTION TO SWITCH SWITCHES
+  function switching($var = "", $val = "") {
+
+    $this->$var = $val;
+
+  } // END FUNCTION SWITCHING
+
+
+  // FUNCTION close
+
+  function close($msg="") {
+
+    if($this->time_start)
+      $this->prn("\nTime spent: "
+      .$this->endTimer()." seconds");
+
+    if($this->format != "plain") {
+      $stamp = date("Y-m-d H:i:s",time());
+      $str  =<<<EOT
+
+== End_logrecord: {$stamp} ===================================({$msg})
+EOT;
+      $this->prn($str);
+    }
+
+    $this->quit();
+  }
+
+
+  // FUNCTION quit
+
+  function quit() {
+    if($this->fp) fclose($this->fp);
+  } // END FUNCTION quit
+
+
+  // TIMERFUNCTIONS
+
+  function getmicrotime() {
+    list($usec, $sec) = explode(" ",microtime());
+    return ((float)$usec + (float)$sec);
+  }
+
+  function startTimer() {
+    $this->time_start = $this->getmicrotime();
+  }
+
+  function endTimer() {
+    return($this->getmicrotime() - $this->time_start);
+  }
+
+
+  // FILETOUCH FUNCTIONS
+
+  // This function writes a file with a message as 'mark'
+  // possible modes: 
+  //  new - file is newly written every time
+  //  day - file is renewed if older than today and msg is appended to
+  //        A backup of an existing path is made when a new day starts
+  //  non - file is never renewed and msg is appended to
+  function touch($path="",$msg="",$mode="new") {
+    if(! $path) return(false);
+    
+    switch($mode) {
+      case "new" :  $filemode = "w";
+                    $end = "";
+                    break;
+      case "day" :  // ga pas berekenen als path bestaat
+                    if (file_exists($path)) {
+                      $time = time(); 
+                      $today = mktime(0,0,0, date("m",$time), date("d",$time), date("Y",$time) );
+                      if(filemtime($path) < $today) { // maak nieuw path; maak eerst backup van bestaande
+                        copy($path, $path . ".yesterday");
+                        $filemode = "w";
+                      }
+                      else { // gebruik bestaand path
+                        $filemode = "a";
+                      }
+                    } 
+                    else { // bestaat nog niet, aanmaken
+                      $filemode = "w";
+                    }
+                    $end = "\n";
+                    break;
+      case "non" :  $filemode = "a";
+                    $end = "\n";
+                    break;
+      default    :  $this->s("class.logger - Wrong touch-create parameter: {$mode}", 1);
+                    return(false); 
+                    break;
+    }
+
+    // open file in filemode
+    if (!($fp = fopen($path, $filemode))) {
+      $this->s("class.logger - Could not create touchfile: {$path}", 1);
+      return(false);
+    }
+
+    if(false === fwrite($fp, $msg.$end)) {
+      $this->s("class.logger - Could not write to touchfile: {$path}", 1);
+      fclose($fp);
+      return(false);
+    }
+    else {
+      $this->p("class.logger - Marking touchfile: '{$path}', '{$msg}'", 3);
+      fclose($fp);
+      return(true);
+    }
+
+  } // END FUNCTION touch
+
+
+} // END MAIN CLASS Logger
+
+// }}}
+
+
+/* ****************************************************************
+* @CLASS:    File 
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+/*
+
+  Class File, based on:
+	File 1.0 - A wrapper class to common PHP file operations
+	Copyright (c) 1999 CDI, cdi@thewebmasters.net
+
+*/
+
+Class File
+{
+	var $FILENAME = "";
+	var $ERROR = "";
+	var $BUFFER = -1;
+	var $STATCACHE = array();
+	var $TEMPDIR = '/tmp';
+	var $REALUID = -1;
+	var $REALGID = -1;
+
+  /*************************************************
+  ** Constructor File
+  *************************************************/
+	function File($fileName='')
+	{
+		global $php_errormsg;
+    if($fileName) $this->FILENAME = $fileName;
+		return;
+	}
+
+
+  /*************************************************
+  ** function clear_cache
+  *************************************************/
+	function clear_cache()
+	{
+		unset($this->STATCACHE);
+		$this->STATCACHE = array();
+		return true;
+	}
+
+
+  /*************************************************
+  ** function is_sane
+  *************************************************/
+	function is_sane($fileName = "", $must_exist = 0, $noSymLinks = 0, $noDirs = 0) {
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		$exists = false;
+
+		if(empty($fileName)) {	return false; }
+		if($must_exist != 0)
+		{
+			if(!file_exists($fileName))
+			{
+				$this->ERROR = "is_sane: [$fileName] does not exist";
+				return false;
+			}
+			$exists = true;
+		}
+		if($exists)
+		{
+			if(!is_readable($fileName))
+			{
+				$this->ERROR = "is_sane: [$fileName] not readable";
+				return false;
+			}
+
+			if($noDirs != 0)
+			{
+				if(is_dir($fileName))
+				{
+					$this->ERROR = "is_sane: [$fileName] is a directory";
+					return false;
+				}
+			}
+
+			if($noSymLinks != 0)
+			{
+				if(is_link($fileName))
+				{
+					$this->ERROR = "is_sane: [$fileName] is a symlink";
+					return false;
+				}
+			}
+
+		} // end if exists
+
+		return true;		
+	}
+
+
+  /*************************************************
+  ** function read_file
+  *
+  * Lees de inhoud van een file
+  *************************************************/
+	function read_file ($fileName = "" )
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		$contents = "";
+
+		if(empty($fileName))
+		{
+			$this->ERROR = "read_file: No file specified"; 
+			return false;
+		}
+		if(!$this->is_sane($fileName,1,0,1))
+		{
+			// Preserve the is_sane() error msg
+			return false;
+		}
+		$fd = @fopen($fileName,"r");
+
+		if( (!$fd) || (empty($fd)) )
+		{
+			$this->ERROR = "read_file: File error: [$php_errormsg]";
+			return false;
+		}
+		$contents = fread($fd, filesize($fileName) );
+		fclose($fd);
+    return $contents;
+	}
+
+
+  /*************************************************
+  ** function firstline_read
+  **
+  ** Read the first line(s) via fgets()
+  ** The parameter $number figures how many lines are read.
+  ** returns an array with lines incase number of lines if > 1
+  ** else returns a string with just the first line
+  *************************************************/
+	function firstline_read ($fileName = "", $number = 1) {
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+
+		if(empty($fileName)) {
+			$this->ERROR = "firstline_read: No file specified"; 
+			return false;
+		}
+
+		if(!$this->is_sane($fileName,1,0,1)) {
+			// Preserve the error
+			return false;
+		}
+
+		if($this->BUFFER > 0) {
+			$buffer = $this->BUFFER;
+		} else {
+			$buffer = filesize($fileName);
+		}
+
+		if($number > 1) $contents = array();
+    else $contents = '';
+
+		$fd = @fopen($fileName,"r");
+
+		if( (!$fd) || (empty($fd)) ) {
+			$this->ERROR = "strip_read: File error: [$php_errormsg]";
+			return false;
+		}
+
+    if($buffer === 0) {
+      $contents = '';
+    }
+    else if($number > 1) {
+      for($i=1; $i<=$number; $i++) {
+        $contents[] = fgets($fd,$buffer+1);
+        if(feof($fd)) break;
+      }
+    }
+    else {
+      $contents = fgets($fd,$buffer+1);
+    }
+
+		fclose($fd);
+    return $contents;
+	}
+
+
+  /*************************************************
+  ** function strip_read
+  **
+  ** Read a file via fgetss(), which strips all php/html
+  ** from the file.
+  *************************************************/
+	function strip_read ($fileName = "", $strip_cr = 0)
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		if(empty($fileName))
+		{
+			$this->ERROR = "strip_read: No file specified"; 
+			return false;
+		}
+		if(!$this->is_sane($fileName,1,0,1))
+		{
+			// Preserve the error
+			return false;
+		}
+		if($this->BUFFER > 0)
+		{
+			$buffer = $this->BUFFER;
+		} else {
+			$buffer = filesize($fileName);
+		}
+
+		$contents = "";
+
+		$fd = @fopen($fileName,"r");
+
+		if( (!$fd) || (empty($fd)) )
+		{
+			$this->ERROR = "strip_read: File error: [$php_errormsg]";
+			return false;
+		}
+		while(!feof($fd)) $contents .= fgetss($fd,$buffer);
+		fclose($fd);
+    return $contents;
+	}
+
+
+  /*************************************************
+  ** function write_file
+  *
+  * Schrijf $data naar een file in new of append mode
+  * $data kan een string of een array zijn.
+  *************************************************/
+	function write_file ($fileName='',$Data,$mode="new") {
+    // mode == append of (default)new
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+
+		$tempfile = tempnam( $this->TEMPDIR, "cdi" );
+
+		if(!$this->is_sane($fileName,0,1,1)) {
+			return false;
+		}
+
+    // Als bestand al bestaat, maak een safety-kopie. In die safety-kopie werken we verder.
+    //
+		if (file_exists($fileName)) {
+			if (!copy($fileName, $tempfile)) {
+				$this->ERROR = "write_file: cannot create backup file [$tempfile] :  [$php_errormsg]";
+				return false;
+			}
+		}
+
+    if($mode == "append")
+      $fd = @fopen( $tempfile, "a" );
+    else
+      $fd = @fopen( $tempfile, "w" );
+
+		if( (!$fd) or (empty($fd)) ) {
+			$myerror = $php_errormsg;
+			unlink($tempfile);
+			$this->ERROR = "write_file: [$tempfile] access error [$myerror]";
+			return false;
+		}
+
+    //
+    // Schrijf nu de data, check eerst of $Data een array is, zo ja doe een join
+    // Omdat join een LF toevoegt moeten de values van $Data 'rtrim'schoon zijn,
+    // dwz geen CR of LF aan het einde
+    //
+    if(is_array($Data)) {
+      fwrite($fd, join("\n",$Data));
+    }
+    else
+  		fwrite($fd, $Data);
+
+		fclose($fd);
+
+		if (!copy($tempfile, $fileName)) {
+			$myerror = $php_errormsg;   // Stash the error, see above
+			unlink($tempfile);
+			$this->ERROR = "write_file: Cannot copy file [$fileName] [$myerror]";
+			return false;
+		}
+
+		unlink($tempfile);
+
+		if(file_exists($tempfile)) {
+			// Not fatal but it should be noted
+			$this->ERROR = "write_file: Could not unlink [$tempfile] : [$php_errormsg]";
+		}
+		return true;
+	}
+
+
+  /*************************************************
+  ** function copy_file
+  *************************************************/
+	function copy_file ($oldFile = "", $newFile = "") {
+    if($oldFile == '' && $this->FILENAME) $oldFile = $this->FILENAME;
+
+		if(empty($oldFile))
+		{
+			$this->ERROR = "copy_file: oldFile not specified";
+			return false;
+		}
+		if(empty($newFile))
+		{
+			$this->ERROR = "copy_file: newFile not specified";
+			return false;
+		}
+		if(!$this->is_sane($oldFile,1,0,1))
+		{
+			// preserve the error
+			return false;
+		}
+		if(!$this->is_sane($newFile,0,1,1))
+		{
+			// preserve it
+			return false;
+		}
+
+		if (! (@copy($oldFile, $newFile)))
+		{
+			$this->ERROR = "copy_file: cannot copy file [$oldFile] [$php_errormsg]";
+			return false;
+		}
+
+		return true;
+	}
+
+
+  /*************************************************
+  ** function rename_file
+  *************************************************/
+	function rename_file ($oldFile = "", $newFile = "") {
+    if($oldFile == '' && $this->FILENAME) $oldFile = $this->FILENAME;
+
+		if(empty($oldFile))
+		{
+			$this->ERROR = "rename_file: oldFile not specified";
+			return false;
+		}
+		if(empty($newFile))
+		{
+			$this->ERROR = "rename_file: newFile not specified";
+			return false;
+		}
+		if(!$this->is_sane($oldFile,1,0,1))
+		{
+			// preserve the error
+			return false;
+		}
+		if(!$this->is_sane($newFile,0,1,1))
+		{
+			// preserve it
+			return false;
+		}
+
+		if (! (@rename($oldFile, $newFile)))
+		{
+			$this->ERROR = "rename_file: cannot rename file [$oldFile] [$php_errormsg]";
+			return false;
+		}
+
+		return true;
+	}
+
+
+  /*************************************************
+  ** @METHOD get_files
+  **
+  ** Return een lijst met filenames in de gevraagde root_dir
+  **
+  ** $root_dir is de te doorzoeken directory
+  ** $fileExt geeft de mogelijkheid van een filefilter, gebaseerd op extentie
+  ** $fullpath geeft het volledig path terug, anders alleen de filenaam
+  ** $sort sorteert het return array
+  **
+  ** Return 1-dimensionaal array met filename:
+  ** array['filename'] = regular file
+  *************************************************/
+	function get_files ($root_dir, $pattern='', $fileExt = 'ALL_FILES', $fullpath = false, $sort = false) {
+
+		$fileList = array();
+
+		if(!is_dir($root_dir))
+		{
+			$this->ERROR = "get_files: Sorry, [$root_dir] is not a directory";
+			return false;
+		}
+    else { // check if there's a trailing slash/backslashes. If not append them at root_dir
+      // een dosdir aanduiding moet een \ bevatten om aan te geven dat het om een dosdir gaat
+      $tmp = strpos($root_dir,"\\");
+      if($tmp === false) { // geen dos dir; 
+        if(substr($root_dir,-1,1) != "/") $root_dir .= "/";
+      }
+      else { // het is een dosdir
+        if(substr($root_dir,-1,1) != "\\") $root_dir .= "\\";
+      }
+    }
+
+		$open_dir = @opendir($root_dir);
+
+		if( (!$open_dir) or (empty($open_dir)) )
+		{
+			$this->ERROR = "get_files: Failed to open dir [$root_dir] : $php_errormsg";
+			return false;
+		}
+
+		$fileCount = 0;
+
+		while ( $file = readdir($open_dir))
+		{
+			if( (!is_dir($file)) and (!empty($file)) )
+			{
+        // scan op pattern
+        if($pattern && ! strstr($file, $pattern)) continue;
+        // alle files in directory
+				if($fileExt == 'ALL_FILES' || $fileExt == '') {
+          $fileList[$fileCount] = ($fullpath) ? $root_dir.$file : $file;
+					$fileCount++;
+				}
+				else if($fileExt == "NONE") {
+          if(!strstr($file,".")) {
+            $fileList[$fileCount] = ($fullpath) ? $root_dir.$file : $file;
+            $fileCount++;
+          }
+				}
+				else if(preg_match("/.\.($fileExt)$/i",$file)) {
+          $fileList[$fileCount] = ($fullpath) ? $root_dir.$file : $file;
+          $fileCount++;
+				}
+
+			}
+		}
+
+		closedir($open_dir);
+    if($sort) sort($fileList);
+    return $fileList;
+
+	}	// end get_files
+
+
+  /*************************************************
+  ** function get_dir_files
+  **
+  ** Return een lijst met file- en dirnames in de gevraagde root_dir
+  **
+  ** $root_dir is de te doorzoeken directory
+  ** $fileExt geeft de mogelijkheid van een filefilter, gebaseerd op extentie
+  ** $fullpath geeft het volledig path terug, anders alleen de filenaam
+  ** $sort sorteert het return array
+  **
+  ** Return 2-dimensionaal array met file(dir)name en soort:
+  ** array['filename'][0] = regular file
+  ** array['filename'][1] = regular dir
+  *************************************************/
+	function get_dir_files ($root_dir, $fileExt = 'ALL_FILES', $fullpath = false, $sort = false)
+	{
+		$fileList = array();
+
+		if(!is_dir($root_dir))
+		{
+			$this->ERROR = "get_dir_files: Sorry, [$root_dir] is not a directory";
+			return false;
+		}
+    else { // check if there's a trailing slash/backslashes. If not append them at root_dir
+           // een dosdir aanduiding moet een \ bevatten om aan te geven dat het om een dosdir gaat
+      $tmp = strpos($root_dir,"\\");
+      if($tmp === false) { // geen dos dir; 
+        if(substr($root_dir,-1,1) != "/") $root_dir .= "/";
+      }
+      else { // het is een dosdir
+        if(substr($root_dir,-1,1) != "\\") $root_dir .= "\\";
+      }
+    }
+
+		$open_dir = @opendir($root_dir);
+
+		if( (!$open_dir) or (empty($open_dir)) )
+		{
+			$this->ERROR = "get_dir_files: Failed to open dir [$root_dir] : $php_errormsg";
+			return false;
+		}
+
+    $dirs = array();
+    $files = array();
+
+		while ( $file = readdir($open_dir))
+		{
+			if( (!empty($file)) )
+			{
+        // geen .dot dirs (. en ..)
+        if(preg_match("/[.]{1,2}$/",$file)) continue;
+
+        if(is_dir($root_dir.$file)) { // directory
+          true == $fullpath ? $dirs[] = $root_dir.$file : $dirs[] = $file;
+        }
+        elseif(is_file($root_dir.$file)) { // regular file
+          if($fileExt == 'ALL_FILES' || $fileExt == '') {
+            true == $fullpath ? $files[] = $root_dir.$file : $files[] = $file;
+          }
+          else {
+            if(preg_match("/.\.($fileExt)$/i",$file)) {
+              true == $fullpath ? $files[] = $root_dir.$file : $files[] = $file;
+            }
+          }
+        } // END ELSE regular file
+
+			}
+		}
+
+		closedir($open_dir);
+
+    if($sort) { sort($dirs); sort($files); }
+
+    $totaal = array();
+
+    foreach($dirs AS $val)  $totaal[] = array("1"=>$val);
+    foreach($files AS $val) $totaal[] = array("0"=>$val);
+
+    return($totaal);
+
+	}	// end get_dir_files
+
+
+  /*************************************************
+  ** function is_owner
+  *************************************************/
+	function is_owner($fileName='', $uid = "")
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		if(empty($uid))
+		{
+			if($this->REALUID < 0)
+			{
+				$tempDir = $this->TEMPDIR;
+				$tempFile = tempnam($tempDir,"cdi");
+				if(!touch($tempFile))
+				{
+					$this->ERROR = "is_owner: Unable to create [$tempFile]";
+					return false;
+				}
+				$stats = stat($tempFile);
+				unlink($tempFile);
+				$uid = $stats[4];
+			}
+			else
+			{
+				$uid = $this->REALUID;
+			}
+		}
+		$fileStats = stat($fileName);
+		if( (empty($fileStats)) or (!$fileStats) )
+		{
+			$this->ERROR = "is_owner: Unable to stat [$fileName]";
+			return false;
+		}
+
+		$this->STATCACHE = $fileStats;
+
+		$owner = $fileStats[4];
+		if($owner == $uid)
+		{
+			return true;
+		}
+
+		$this->ERROR = "is_owner: Owner [$owner] Uid [$uid] FAILED";
+		return false;
+	}
+
+
+  /*************************************************
+  ** function is_inGroup
+  *************************************************/
+	function is_inGroup($fileName='', $gid = "")
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		if(empty($gid))
+		{
+			if($this->REALGID < 0)
+			{
+				$tempDir = $this->TEMPDIR;
+				$tempFile = tempnam($tempDir,"cdi");
+				if(!touch($tempFile))
+				{
+					$this->ERROR = "is_inGroup: Unable to create [$tempFile]";
+					return false;
+				}
+				$stats = stat($tempFile);
+				unlink($tempFile);
+				$gid = $stats[5];
+			}
+			else
+			{
+				$gid = $this->REALGID;
+			}
+		}
+		$fileStats = stat($fileName);
+		if( (empty($fileStats)) or (!$fileStats) )
+		{
+			$this->ERROR = "is_inGroup: Unable to stat [$fileName]";
+			return false;
+		}
+
+		$this->STATCACHE = $fileStats;
+
+		$group = $fileStats[5];
+		if($group == $gid)
+		{
+			return true;
+		}
+
+		$this->ERROR = "is_inGroup: Group [$group] Gid [$gid] FAILED";
+		return false;
+	}
+
+
+  /*************************************************
+  ** function get_real_uid
+  *************************************************/
+	function get_real_uid($fileName='')
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		$tempDir = $this->TEMPDIR;
+		$tempFile = tempnam($tempDir,"cdi");
+		if(!touch($tempFile))
+		{
+			$this->ERROR = "is_owner: Unable to create [$tempFile]";
+			return false;
+		}
+		$stats = stat($tempFile);
+		unlink($tempFile);
+		$uid = $stats[4];
+		$gid = $stats[5];
+		$this->REALUID = $uid;
+		$this->REALGID = $gid;
+		return $uid;
+	}
+
+
+  /*************************************************
+  ** function get_real_gid
+  *************************************************/
+	function get_real_gid($fileName='')
+	{
+    if($fileName == '' && $this->FILENAME) $fileName = $this->FILENAME;
+		$uid = $this->get_real_uid();
+		if( (!$uid) or (empty($uid)) )
+		{
+			return false;
+		}
+		return $this->REALGID;
+	}
+
+}	// end class File
+
+
+Class Filewrapper extends File
+{
+
+	function Filewrapper($fileName='')
+	{
+		parent::File($fileName);
+		return;
+	}
+
+}	// end class Filewrapper
+
+
+/*******************************************************************************
+***  END _logging.lib
+******************************************************************************}}} */
+
+
+/* ****************************************************************
+* @LIB:      _mailer.class
+* @CLASS:    Mailer(..)
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+/**
+  Mailerfuncties
+  --------------
+  syntax:
+
+      require("_mailer.class");
+
+      $mail = new Mailer('plain');
+    of:
+      $mail = new Mailer('html');
+    of, meer uitgebreid:
+      $mail = new Mailer('plain'[,"sender"][,"receipient"][,"smtpserver"][,"domain"]);
+
+  Er zijn twee manieren om een mailbericht aan te maken.
+
+  1. Door het ingeven van losse attributen:
+    ---------------------------------------------------------------------  
+    $mail->receipient = "to@to.nl";
+    $mail->sender     = "from@from.nl";
+    $mail->smtpserver = "smtp.xs4all.nl";
+    $mail->subject    = "Onderwerp";
+    $mail->headers    = array('X-INFO: Mailer-class VROMCatalogus services'
+                             ,'X-INFO: programmas en copyright ML design & techniek'
+                             ,'X-Mailer: sendmail vs.12 Win32 SMTP mailer');
+    $mail->bodytext   =<<<EOT
+tekst van de mailbody
+
+EOT;
+    ---------------------------------------------------------------------  
+
+
+  2. Of door het ingeven van een volledige mailtext incl. headers:
+    ---------------------------------------------------------------------  
+    $mail->mailtext =<<<EOT
+From: sender@domain.com
+To: receipient@domain.name
+Date: Tue, 17 May 2007 00:37:17 +0200
+Subject: Je gebruikersnaam voor deze applicatie
+Content-Transfer-Encoding: 7BIT
+Content-Type: text/plain; charset=ISO-8859-1
+X-INFO: Mailer-class application services
+X-INFO: by ML design & techniek
+X-Mailer: sendmail vs.12 Win32 SMTP mailer
+
+tekst van de mailbody
+
+EOT;
+    ---------------------------------------------------------------------  
+  
+  Let op het verschil tussen $mail->bodytext en $mail->mailtext 
+
+  Belangrijk: de tweede manier werkt alleen als de mailer
+  gebruik maakt van de 'sendmail -t' modus dus verwacht
+  een compleet bericht incl. headers als inputstream.
+  Dit zijn o.a. sendmail en nbsmtp. 
+  'blat.exe' kan dit dus niet, daarvoor alleen de eerste methode
+  gebruiken.
+  
+  Tijden de init van het object wordt de 'MAILER' constante gelezen.
+  De 'MAILER' constante wordt meestal in de _init.xx gezet en bevat b.v.:
+
+    define("MAILER", "D:\\websites\\Mailer\\blat ");
+  of
+    define("MAILER", "D:\\websites\\Mailer\\sendmail.exe -t ");  
+    
+  Als de 'MAILER' constante niet wordt gevonden, dan wordt default 
+  'sendmail -t' als mailer gezet.
+  
+  
+  De attributen:
+    $mail->sender     = "from@from.nl";
+    $mail->receipient = "to@to.nl";
+    $mail->smtpserver = "smtp.domain.nl";
+    $mail->subject    = "Onderwerp";
+    $mail->headers    = array("X-een","X-twee");
+
+  kunnen ook in een _init file worden gezet als:
+$GLOBALS['config->data']['mail']['sender']     = 'from@from.nl';
+$GLOBALS['config->data']['mail']['receipient'] = 'to@to.nl';
+$GLOBALS['config->data']['mail']['smtpserver'] = 'smtp.domain.nl';
+$GLOBALS['config->data']['mail']['domain']     = 'domain.com';
+$GLOBALS['config->data']['mail']['headers']    = array('X-INFO: Mailer-class application services
+                                                   ,'X-INFO: ML design & techniek'
+                                                   ,'X-Mailer: sendmail vs.12 Win32 SMTP mailer');
+
+  
+*/
+
+Class Mailer{
+  var $contentType = "";
+  var $maildate = "";
+  var $bodytext = "";
+  var $mailtext = "";
+  var $subject = "";
+  var $mailer="";
+  var $sender="";
+  var $receipient="";
+  var $smtpserver="";
+  var $sending_domain="";
+  var $status='false';
+  var $more_headers=array();
+  var $attach=array();
+  var $logging=3; // logniveau: 0=uit, 1..4=loggen als loggerobject bestaat
+
+  /**
+  * Constructor of the class.
+  *
+  * This constructor initializes the class and, when sets the class-properties.
+  * The class property 'mode' sets the email mode and is either 'html' or 'plain'. If
+  * none is set it defaults to 'plain'.
+  * The class properties 'sender', 'receipient', 'server' and 'domain' can be supplied during
+  * class-initializing or may be set as global parms in which case they will be read
+  * during initialize.
+  *
+  * @access    public
+  * @author    Frank Kooger <frank@ml-design.com>
+  * @param     string $mode, e-mail mode: 'html' or 'plain'(defaults). May be empty
+  * @param     string $sender, sender of the mail. May be empty or a global parm
+  * @param     string $receipient, receipient of the mail. May be empty or a global parm
+  * @param     string $server, smtp server through wich the mail will be sent. May be empty or a global parm
+  * @param     string $domain, domain from which the mail originates. May be empty or a global parm
+  * @return    void
+  * @see       setParms()
+  */
+  function Mailer($mode='plain'
+                 ,$sender=''
+                 ,$receipient=''
+                 ,$server=''
+                 ,$domain='') {
+    
+    $this->sender         = $this->setParms($sender, "sender");
+    $this->receipient     = $this->setParms($receipient, "receipient");
+    $this->smtpserver     = $this->setParms($server, "server");
+    $this->sending_domain = $this->setParms($domain, "domain");
+    
+    isset($GLOBALS['logger']) ? $this->logger = $GLOBALS['logger'] : $this->logger = '';
+    $this->setContentType($mode);
+    $this->maildate = date("r", time());
+
+    $this->setMailer();
+
+  }
+
+
+  /**
+  * Set class-properties
+  *
+  * This method sets class properties in the order: 
+  * a) initial supplied parms if set;
+  * b) globally set parms if supplied. Different globalnames will be scanned/read, read
+  * the setParms method for a resumé.
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     string $methodparm, the initial supplied value for the property, if set
+  *            else empty string
+  * @param     string $type, the property for which the value will be scanned/returned
+  * @return    string, the returned string contains the value for the property
+  *            or false if no value found
+  * @see       read setParms for resumé of possible global parms
+  */
+  function setParms($methodparm, $type) {
+    global $config;
+    
+    // default Params
+    switch($type) {
+      
+      case "sender"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['mail']['sender'])) return($config->data['mail']['sender']);
+        else if(! empty($GLOBALS['mailsender'])) return($GLOBALS['mailsender']);
+        else return(false);
+        break;
+      case "receipient"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['mail']['receipient'])) return($config->data['mail']['receipient']);
+        else if(! empty($GLOBALS['receipient'])) return($GLOBALS['receipient']);
+        else return(false);
+        break;
+      case "server" :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['mail']['smtpserver'])) return($config->data['mail']['smtpserver']);
+        else if(defined("DBPASSWD")) return(DBPASSWD);
+        else if(! empty($GLOBALS['smtpserver'])) return($GLOBALS['smtpserver']);
+        else return(false);
+        break;
+      case "domain" :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['mail']['domain'])) return($config->data['mail']['domain']);
+        else if(defined("DEFAULTDBASE")) return(DEFAULTDBASE);
+        else if(! empty($GLOBALS['sendingdomain'])) return($GLOBALS['sendingdomain']);
+        else return(false);
+        break;
+      default         :
+        break;
+
+    } // end switch
+
+  } // END FUNCTION setParms
+
+
+  /**
+  * Set mailer type
+  *
+  * This method sets class mailer type. It reads the global constant 'MAILER' if set.
+  * Defaults to 'sendmail -t' if no constant is set.
+  * Global constant can be any form of (for the 'sendmail -t' mode):
+  * define("MAILER", "/usr/local/bin/nbsmtp "
+  *                 ." -d {$GLOBALS['config->data']['mail']['domain']} "
+  *                 ." -f {$GLOBALS['config->data']['mail']['receipient']} "
+  *                 ." -h {$GLOBALS['config->data']['mail']['smtpserver']} ");
+  * define("MAILER", "/usr/sbin/sendmail -t ");
+  * or (for the 'blat' mode, where the blat commandline parms are supplied in the sendMail method)
+  * define("MAILER", "D:\\vromcatalogus\\Mailer\\blat.exe ");
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     const MAILER, definition for a mailertype if set
+  * @return    void, sets the class property 'mailer'
+  */
+  function setMailer() {
+    // Mailer
+    if(defined("MAILER")) {
+      $this->mailer = MAILER ;
+    }
+    else {
+      $this->mailer = 'sendmail -t' ;
+    }
+  } // END FUNCTION setMailer
+
+ 
+  /**
+  * Set class-properties
+  *
+  * This method sets class properties in the order: 
+  * a) initial supplied parms if set;
+  * b) globally set parms if supplied. Different globalnames will be scanned/read, read
+  * the setParms method for a resumé.
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     string $methodparm, the initial supplied value for the property, if set
+  *            else empty string
+  * @param     string $type, the property for which the value will be scanned/returned
+  * @return    string, the returned string contains the value for the property
+  *            or false if no value found
+  * @see       read setParms for resumé of possible global parms
+  */
+  function setContentType($mode) {
+    switch($mode) {
+      case 'htm'  : 
+      case 'html' : 
+        $this->contentType  = "Content-Transfer-Encoding: 7BIT\n";
+        $this->contentType .= "Content-Type: text/html; charset=ISO-8859-1";
+        break;
+      default     :
+        $this->contentType  = "Content-Transfer-Encoding: 7BIT\n";
+        $this->contentType .= "Content-Type: text/plain; charset=ISO-8859-1";
+        break;
+    }
+  } // END FUNCTION setContentType
+
+ 
+  /**
+  * Send mail in either 'blat' or 'sendmail -t' shape
+  *
+  * This method finishes the mail via the mailcomponents (mailtext or bodytext/seperate components)
+  * and sends the mail either via:
+  * - the 'blat' method: 'blat <commandline parms>
+  * - the 'sendmail -t' method: 'cat mailtext | sendmail -t' or 'cat mailtext | nbsmtp <commandline parms>'
+  * The mailtext and other components are parms of an object. This may be 
+  * the mail object itself, fed recursively to itself ( $mailobj->sendMail($mailobj) ), or a dummy object, 
+  * equipped with the right parms ( $mailobj->sendMail($dummy) ).
+  * If $obj->mailtext in 'sendmail -t' method is empty, it will be assembled in method 'assembleMailtext'
+  * out of seperate $obj components.
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     obj $obj, an object containing the parms 'sender, receipient, maildate, subject, 
+  *            contentType, [arr more_header]' for the 'blat' or 'sendmail' methods or the
+  *            parms 'mailtext, [arr more_headers]' only for sendmail method
+  * @param     arr $GLOBALS['config']->data['mail']['headers'], extra headers, globally read by the method if set f.e.: 
+  *            $GLOBALS['config']->data['mail']['headers'] = array('X-INFO: Mailer-class VROM Bibliotheekcatalogus services'
+  *                                                            ,'X-INFO: programmas en copyright ML design & techniek'
+  *                                                            ,'X-Mailer: sendmail vs.12 Win32 SMTP mailer');
+  * @param     arr $GLOBALS['config']->data['mail']['debugfile'], if this global parm is set with a pathname,
+  *            a copy of obj->mailtext is written to the pathname (only with 'sendmail -t' method) 
+  * @return    void
+  * @see       see assembleMailtext for assemblage of obj->mailtext if not given
+  */
+  function sendMail(&$obj) {
+    if(strlen($obj->mailtext) == 0 && strlen($obj->bodytext) == 0) {
+      return(false);
+    }
+    if(preg_match("/blat/", $this->mailer)) { // blatmail
+      // bij deze mailvorm worden alle headerelementen en de bodytext
+      // apart aangeleverd.
+      $more_headers = '';
+      // config->data headers
+      if(sizeof($GLOBALS['config']->data['mail']['headers'])) // er zijn global headers
+        foreach($GLOBALS['config']->data['mail']['headers'] AS $val) 
+          $more_headers .= "-x \"{$val}\" ";
+      // aux headers
+      if(sizeof($obj->more_headers)) // er zijn meer headers
+        foreach($obj->more_headers AS $val) {
+          $more_headers .= "-x \"{$val}\" ";
+        }
+
+      $mailer = $this->mailer." - -server {$obj->smtpserver} -f {$obj->sender} -to {$obj->receipient} -subject \"{$obj->subject}\" {$more_headers}";
+      $fd = popen($mailer, "w");
+      fputs($fd, $obj->bodytext, strlen($obj->bodytext));
+      $this->status = 'Sent blat mailer';
+      if(isset($this->logger) && $this->logging) {
+        //$this->logger->p("mailer.class::sendMail - Sent mail van: {$obj->sender}, naar: {$obj->receipient}, subj: {$obj->subject}", $this->logging);
+        //$this->logger->p("mailer.class::sendMail - mailer opened: {$mailer}", 4);
+      }
+      pclose($fd);
+    }
+    else { // sendmail/nbmtp/msmtp etc. mail 
+      // bij deze mailvorm wordt de volledige tekt (header en bodytext) aangeleverd als 'mailtext'
+      // Als 'mailtext' niet gezet is, wordt eerst een 'mailtext' geassembleerd uit de losse
+      // header en bodytext elementen.
+      if(! $obj->mailtext) $this->assembleMailtext($obj);
+
+      $fd = popen($this->mailer,"w");
+      fputs($fd, $obj->mailtext, strlen($obj->mailtext));
+      $this->status = 'Sent sendmail/nbsmtp/msmtp etc. mailer';
+      // debug output
+      if(! empty($GLOBALS['config']->data['mail']['debugfile'])) {
+        $makedebugfile = false;
+        // controleer eerst of de debugfile al bestaat en is writable
+        if (is_file($GLOBALS['config']->data['mail']['debugfile'])) { 
+          // bestaat, controleer nu of writable
+          if(is_writable($GLOBALS['config']->data['mail']['debugfile'])) {
+            $makedebugfile = true;
+          }
+        }
+        else {
+          // bestaat nog niet, maak nieuw
+          $makedebugfile = true;
+        }
+        if($makedebugfile) {
+          if($fp = @fopen($GLOBALS['config']->data['mail']['debugfile'],"w")) {
+            fputs($fp, $obj->mailtext, strlen($obj->mailtext));
+            fclose($fp);
+          }
+        }
+      }
+      // logging output
+      if(isset($this->logger) && $this->logging) {
+        //$this->logger->p("mailer.class::sendMail - Sent mail van: {$obj->sender}, naar: {$obj->receipient}, subj: {$obj->subject}", $this->logging);
+        //$this->logger->p("mailer.class::sendMail - mailer opened: {$this->mailer}", 4);
+      }
+      pclose($fd);
+    }
+    // sleep(1);
+  } // END FUNCTION SendMail
+
+
+  /**
+  * Assembles a complete mailtext out of seperate mailcomponents
+  *
+  * This method assembles a complete object->mailtext out of seperate mailcomponents:
+  * object->  sender, receipient, maildate, subject, contentType
+  * The mailtext and other components are parms of an object. This may be 
+  * the mail object itself, fed recursively to itself, or a dummy object, equipped with
+  * the right parms.
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     obj $obj, an object containing the parms 'sender, receipient, maildate, subject, 
+  *            contentType, [arr more_header]'
+  * @param     arr $GLOBALS['config']->data['mail']['headers'], read by the method if set 
+  * @return    void, the resulting assembled mailtext of the method is set in $obj->mailtext
+  */
+  function assembleMailtext(&$obj) {
+    // Als To is ingevuld, gebruik dit als receipient
+    if(empty($obj->receipient) && ! empty($obj->to)) $obj->receipient = $obj->to;
+    // assembleer mailtext uit losse componenten
+    $headers  = "From: {$obj->sender}\n";
+    $headers .= "To: {$obj->receipient}\n";
+    $headers .= "Date: {$obj->maildate}\n";
+    $headers .= "Subject: {$obj->subject}\n";
+    $headers .= "{$obj->contentType}\n";
+
+    // config->data headers
+    if(isset($GLOBALS['config']->data['mail']['headers']) && sizeof($GLOBALS['config']->data['mail']['headers']))  // er zijn global headers
+      foreach($GLOBALS['config']->data['mail']['headers'] AS $val) 
+        $headers .= "{$val}\n";
+
+    // aux headers
+    if(sizeof($obj->more_headers))  // er zijn meer headers
+      foreach($obj->more_headers AS $val) {
+        $headers .= "{$val}\n";
+      }
+
+    // mailtext assembly
+    $obj->mailtext =<<<EOT
+{$headers}
+{$obj->bodytext}
+
+EOT;
+  } // END FUNCTION assembleMailtext
+
+
+  /**
+  * Cleanup formfield from unwanted characters
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     string $stringtoclean
+  * @return    string, cleanedup string
+  */
+  function cleanFormField($input) {
+    return(strtr($input,';:!()`','      '));
+  }  // END FUNCTION cleanFormField
+
+
+} // END CLASS Mailer
+
+/*******************************************************************************
+***  END _mailer.class
+*******************************************************************************}}} */
+
+
+/* ****************************************************************
+* @LIB:      _user.lib
+* @CLASS:    UserClass
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+/* ****** 
+   User related library
+*/
+
+Class UserClass{
+  
+  /** FUNCTION random_passwd()
+  * create random password with length $max
+  */
+  function random_passwd($style='moderate', $max=8) {
+
+    do {
+      $str = '';
+      $pwd = '';
+
+      switch($style) {
+        case 'verycomplex'  :
+          $str .= '*=(){}[]:;.,<>';
+        case 'complex'  :
+          $str .= '-$!@#%&+?';
+        case 'moderate' :
+          $str .= '23456789';
+        case 'simple'   :
+          $str .= 'abcdefghkmnpqrstuvwxyz'
+                 .'ABCDEFGHKMNPQRSTUVWXYZ';
+          $randmax = strlen($str) - 1;
+          break;
+      }
+
+      for($i=0; $i<$max; $i++) 
+        $pwd .= $str[mt_rand(0,$randmax)];
+
+      //
+      // Controleer of van alle tekens die bij een bepaalde modus horen, er wel
+      // tenminste 1 inzit. Zo niet, doe het nog eens.
+      //
+      switch($style) {
+        case 'verycomplex'  :
+          if(!$akkoord = preg_match("/[*=(){}[\]:;.,<>]/", $pwd)) break;
+        case 'complex'  :
+          if(!$akkoord = preg_match("/[-$!@#%&+?]/", $pwd)) break;
+        case 'moderate' :
+          if(!$akkoord = preg_match("/[2-9]/", $pwd)) break;
+        case 'simple'   :
+        default         :
+          $akkoord = true;
+          break;
+      }
+
+    } while(!$akkoord);
+
+    return($pwd);
+
+  } // END FUNTION random_passwd
+
+} // END CLASS UserClass
+
+/*******************************************************************************
+***  END _user.lib
+******************************************************************************}}} */
+
+?>

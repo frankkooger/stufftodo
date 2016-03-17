@@ -1,0 +1,48 @@
+INSTALLATIE
+===========
+- Als een re-installatie wordt gedaan en een schema wordt gekozen dat niet
+geladen kan worden omdat de database al bestaat, dan bevat
+$GLOBALS['ML_SYSTEM']['db']['schema'] wel de naam van het schema terwijl het
+niet geladen is. Beter is dat deze parameter geleegd wordt als het schema niet
+geladen is.
+
+- Als je het install scherm draait op een bestaande config.inc dan wordt dbase
+user en password niet gelezen maar de default waarden ingevuld. 
+PS dit kan je ook als een feature zien zodat deze gegevens niet tonen als
+achteraf iemand dit scherm opent!
+
+BOEKEN
+======
+- bij het boeken van een boekregel kan je elk willekeurig grootboeknummer
+invullen; ook niet-bestaande. Hier moet een controle op.
+
+- er kan een situatie optreden (door verwijderingen van boekregels tijdens
+  boeken waardoor een btw regel blijft hangen) dat een boekregel met
+  journaalpost 0 wordt opgeslagen. Dit moet worden voorkomen. Dit kan door het
+  mechanisme te verbeteren (atomic transactie) of een controleoptie in te bouwen
+  die op dit soor anomalien controleert.
+
+- als je van een journaalpost de periode wilt wijzigen dan kan dat niet onder
+de boodschap 'de gevraagde periode valt in of voor een afgesloten periode'. In
+een aantal gevallen moet het echter wel kunnen, b.v. bij memoriaalposten die
+b.v. eindejaar geboekt worden.
+
+RAPPORTAGE
+==========
+
+SYSTEEM
+=======
+- De toekenning van BTW tarieven en automatische boekingen/berekeningen op
+grootboekrekeningen moet beter, soepeler. Je moet nu op verschillende plekken
+btw rekeningnummers (stamgegevens) en classes (grootboekrekeningen) ingeven en
+dat is onduidelijk. Wat niet klopt is dat je een btwclass aan een
+grootboekrekening moet koppelen om te zorgen dat het btwbedrag op een bepaalde
+btwrekening wordt geboekt. Maar stel dat een verkooprekening is gekoppeld aan
+btwlaagtarief en je boekt een hoogbtwbedrag via een boekregel op die rekening
+dan wordt dat hoge bedrag op de laagbtwtarief rekening bijgeschreven en klopt
+de aangifte niet meer omdat deze omzet uitrekent vanuit de btw bedragen op de verschillende BTW-rekeningen.
+
+- er moeten meer btw-aangiftelabels in de tabel worden opgenomen. Feitelijk
+alle labels van het aangifteformulier waarbij dan een keuze kan worden gemaakt
+welke werkelijk gebruikt worden.
+

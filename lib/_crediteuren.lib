@@ -1,0 +1,258 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _crediteuren.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+Class Crediteuren {
+
+  
+  /* ****************************************************************
+  * @METHOD:   void Crediteuren() 
+  * @SYLLABUS: Constructor
+  *   Deze class maakt een eigen dbConnector aan. Dit betekent dat de methoden
+  *   uit deze class niet gebruikt kunnen worden in de vorm:
+  *     Crediteuren::<methode>
+  *
+  *****************************************************************{{{ */
+  public function __construct() {
+    $this->file = basename(__FILE__);
+
+    $this->openPointer();
+
+  } // END FUNCTION Crediteuren }}}
+
+
+  /********************************************************************* 
+  * @METHOD: void openPointer() 
+  * @RETURNS:   
+  * @SYLLABUS:  
+  *    Opent een db pointer 
+  * 
+  /* *********************************************************************{{{ */ 
+  function openPointer() { 
+    $this->db = &$GLOBALS['stam'];
+    return(true);
+    return(parent::__construct());
+  } // END METHOD openPointer}}} 
+ 
+
+  /********************************************************************* 
+  * @METHOD: str innerJoin( string $str ) 
+  * @RETURNS:  string 
+  * @SYLLABUS:  
+  *    Verandert in een querystring 'LEFT JOIN' in 'INNER JOIN'
+  * 
+  /* *********************************************************************{{{ */ 
+  function innerJoin($str) { 
+    return(preg_replace("/LEFT JOIN/", "INNER JOIN", $str)); 
+  } // END METHOD innerJoin}}} 
+ 
+
+  /* ****************************************************************
+  * @METHOD:   selectFill( int $id[, int $lastinserted=''] ) 
+  * @SYLLABUS: 
+  *   Vul de pulldown crediteuren select velden.
+  *   Geeft een string met het volledige <options> deel terug.
+  *   Als teruggekomen wordt van een nieuw record dan willen we hier het
+  *   nieuwe record wel zien maar het moet niet verder geladen worden zodat 
+  *   het form leeg blijft voor evt. nog een nieuw record.
+  *   Gebruik dan hier het lastinserted uit het save scherm om de selectie zichtbaar te maken.
+  *   NOOT: voor crediteuren/crediteurenstam kan het handig zijn ter controle het record wel te zien.
+  *         daarom laten we het id in savescherm toch staan zodat het hier laadt met het nieuwe record.
+  *
+  *****************************************************************{{{ */
+  function selectFill($id, $lastinserted='') {
+
+    $this->db->Do_query("SELECT \"id\",\"naam\" FROM {$this->db->crediteurenstam} ORDER BY \"naam\"", $this->file."::".__FUNCTION__."::".__LINE__);
+
+    $overzicht = "\n<option value='0'>---------------------</option>";
+
+    while($obj = $this->db->Do_object()) {
+      $str = "{$obj->naam} [{$obj->id}]";
+
+      if($obj->id == $id) 
+        $overzicht .= "\n<option selected='selected' value='{$obj->id}'>{$str}</option>";
+      else if(! empty($lastinserted) && $obj->id == $lastinserted) 
+        $overzicht .= "\n<option selected='selected' value='{$obj->id}'>{$str}</option>";
+      else 
+        $overzicht .= "\n<option value='{$obj->id}'>{$str}</option>";
+    }
+
+    return($overzicht);
+
+  } // END FUNCTION selectFill }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   obj loadKaart( int $id ) 
+  * @SYLLABUS: 
+  *   Vraag een object uit de crediteurenstam
+  *
+  *****************************************************************{{{ */
+  function loadKaart($id) {
+    global $msg;
+    if($obj = $this->db->Get_object("SELECT * FROM {$this->db->crediteurenstam} WHERE \"id\"={$id} ", $this->file."::".__FUNCTION__."::".__LINE__)) {
+      return($obj);
+    }
+    else {
+      $msg['red'][] = "De crediteurenstamkaart kan niet worden geladen!";
+      return(false);
+    }
+  } // END METHOD loadKaart}}}
+
+
+  /* ****************************************************************
+  * @METHOD:   obj loadDummy( ) 
+  * @SYLLABUS: 
+  *   Vraag een leeg Dummyobject dat een object uit de crediteurenstam vervangt
+  *
+  *****************************************************************{{{ */
+  function loadDummy() {
+    $sobj = new Dummy();
+    $sobj->naam = '';
+    $sobj->code = '';
+    $sobj->telefoon = '';
+    $sobj->fax = '';
+    $sobj->contact = '';
+    $sobj->email = '';
+    $sobj->adres = '';
+    return($sobj);
+  } // END METHOD loadDummy}}}
+
+
+  /* ****************************************************************
+  * @METHOD:   str deleteKaart( int $id ) 
+  * @RETURNS: $id indien niet geslaagd, '' indien geslaagd
+  * @SYLLABUS: 
+  *   Verwijder een crediteurenkaart o.b.v. het id.
+  *
+  *****************************************************************{{{ */
+  function deleteKaart( $id) {
+    global $msg;
+    // als er facturen op naam van deze crediteur staan kunnen we niet verwijderen.
+    if($this->db->Get_field('COUNT("id")', $this->db->inkoopfacturen, "\"relatieid\"={$id}", $this->file."::".__FUNCTION__."::".__LINE__)) {
+      $msg['red'][] = "Er zijn nog inkoopfacturen op naam van deze crediteur! Kan niet verwijderen.";
+      return($id);
+    }
+    else {
+      if($this->db->Delete_record($this->db->crediteurenstam, "\"id\"={$id} ", $this->file."::".__FUNCTION__."::".__LINE__)) {
+        $msg['red'][] = "Crediteur: {$id} is verwijderd!";
+        return('');
+      }
+    }
+  } // END FUNCTION deleteKaart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   array fetchFacturen( str $select ) 
+  * @RETURNS:  een array met factuurregels als objecten
+  * @SYLLABUS: 
+  *   Lees factuurregels in obv extern aangeleverde selectiecriteria
+  *
+  *****************************************************************{{{ */
+  function fetchFacturen($select) {
+
+    $select = preg_replace("/^[ ]*(AND|OR)/", "WHERE", $select);
+
+    $this->db->query =<<<EOT
+    SELECT
+       c."id" AS "crediteurid"
+      ,c."code"
+      ,c."naam" AS "naam"
+      ,f."id" AS "factuurid"
+      ,f."journaalid"
+      ,f."datum"
+      ,f."omschrijving"
+      ,f."factuurbedrag"
+      ,f."relatiecode"
+      ,f."relatieid"
+      ,f."factuurnummer"
+      ,f."voldaan"
+      ,f."betaaldatum"
+    FROM
+    {$this->db->crediteurenstam} AS c
+      LEFT JOIN {$this->db->inkoopfacturen} AS f
+      ON (c."id"=f."relatieid")
+      {$select}
+    ORDER BY "naam",f."datum"
+EOT;
+
+    $this->db->Do_sql( $this->file."::".__FUNCTION__."::".__LINE__);
+
+    // lees in een obj array en geef deze terug
+    //
+    $arr = array();
+    while($obj = $this->db->Do_object()) $arr[] = $obj;
+
+    return($arr);
+
+  } // END FUNCTION fetchFacturen }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   array fetchNietBetaaldeFacturen( [ str $relatieid='' ] ) 
+  * @RETURNS:  een array met factuurregels als objecten, een lege array bij geen succes
+  * @SYLLABUS: 
+  *   Lees factuurregels van niet (volledig) betaalde facturen in obv extern
+  *   aangeleverde relatieid. De methode maakt er zelf de juiste selectie bij.
+  *   Het resultaat wordt aangevuld met openstaande bedragen.
+  *
+  *****************************************************************{{{ */
+  function fetchNietBetaaldeFacturen($relatieid = '') {
+    if(!$relatieid) return(array());
+
+    // haal openstaande facturen in een objecten array
+    //
+    $arr = $this->fetchFacturen(" WHERE f.\"relatieid\"={$relatieid} AND \"factuurbedrag\" <> \"voldaan\"");
+    
+    // Bereken de inhoud van de factuurobjecten op openstaande bedragen
+    //
+    foreach($arr AS $key=>$obj) {
+      $arr[$key]->datum = $GLOBALS['timer']->iso2norm($obj->datum);
+      $arr[$key]->openstaand = $obj->factuurbedrag - $obj->voldaan;
+      // is het openstaande bedrag een rest?
+      $arr[$key]->restvlag = ($obj->voldaan > 0 && $obj->voldaan <> $obj->factuurbedrag) ? "<font color='red'>*</font> " : '';
+    }
+
+    return($arr);
+
+  } // END FUNCTION fetchNietBetaaldeFacturen }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   getTotaalSaldo() 
+  * @SYLLABUS: 
+  *   Hulpfunctie om totaal aan omzet aan facturen te berekenen
+  *
+  *****************************************************************{{{ */
+  function getTotaalSaldo($id) {
+
+    $saldo = 0.00;
+    $saldo = $this->db->Get_field('SUM("factuurbedrag")',$this->db->inkoopfacturen,"\"relatieid\"={$id}", $this->file."::".__FUNCTION__."::".__LINE__);
+    return(sprintf("%0.2f", $saldo));
+
+  } // END FUNCTION getTotaalSaldo }}}
+
+
+} // END CLASS Crediteuren
+
+
+?>

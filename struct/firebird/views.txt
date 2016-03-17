@@ -1,0 +1,129 @@
+-- vim: syntax=sql
+--
+-- Views and stored procedures voor administratie-database in Firebird
+--
+
+-- Onderstaande query werkt in FB en in sqlite:
+--
+SELECT s."code",s."subcode",d."grootboekrekening",s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (CAST(d."grootboekrekening" AS varchar(12)) = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY s."code", cast(s."subcode" as integer);
+--
+-- Vreemd is dat sqlite 4 resultaten laat zien en FB 5 (subcode 3, grb 1000)
+-- Onderstaande query werkt in mysql en in sqlite en nu laat sqlite wel de 5 records zien!! Ook als de ORDER BY cast erin zit zoals hierboven!
+--
+SELECT s."code",s."subcode",d."grootboekrekening",s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (d."grootboekrekening" = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY s."code", s."subcode" + 0;
+
+-- Als we die in een View willen onderbrengen werkt het wel goed in FB maar niet meer in sqlite.
+-- Een ORDER BY mag in FB nl geen onderdeel zijn van de View zelf dus je doet een ORDER BY tijdens het bevragen van de view.
+-- Bij FB krijg je dan netjes de gesorteerde output bij sqlite sorteert 'ie niet; daar moet de order by onderdeel zijn van de view.
+
+-- isql form of CONNECT:
+CONNECT
+  "/pub/webs/openadministratie/dbase/administratie.fdb" 
+  user 'sysdba' password 'OpenAdmin.nl';
+
+CREATE VIEW VW_DAGBOEK ("scode","subcode","grootboekrekening","naam") AS
+SELECT s."code", s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (CAST(d."grootboekrekening" AS varchar(12)) = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0;
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK ORDER BY scode, cast("subcode" as integer);
+
+
+-- sqlite en mysql willen geen velddefinitie in de view zelf
+-- ipv:
+CREATE VIEW VW_DAGBOEK ("scode","subcode","grootboekrekening","naam") AS
+-- doe je dan:
+CREATE VIEW VW_DAGBOEK AS
+SELECT s."code" AS "scode", s."subcode" AS "subcode", d."grootboekrekening" AS "grootboekrekening", s."naam" AS "naam"
+-- of simpeler (zolang er maar geen amibuiteit optreedt):
+SELECT s."code" AS "scode", "subcode", "grootboekrekening", "naam"
+
+-- De order by kan wel in de view staan. Bij sqlite is het zelfs zo dat een order by met de View call meegegeven, niet werkt.
+--
+-- sqlite:
+DROP VIEW VW_DAGBOEK;
+CREATE VIEW VW_DAGBOEK AS
+SELECT s."code" AS code, s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (d."grootboekrekening" = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY s."code", cast(s."subcode" as integer);
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK;
+
+--
+-- mysql:
+DROP VIEW VW_DAGBOEK;
+CREATE VIEW VW_DAGBOEK AS
+SELECT s."code" AS code, s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (d."grootboekrekening" = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0
+ORDER BY s."code", s."subcode" + 0;
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK;
+
+-- Firebird:
+CREATE VIEW VW_DAGBOEK ("code","subcode","grootboekrekening","naam") AS
+SELECT s."code", s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d
+INNER JOIN "stamgegevens" AS s
+ON (CAST(d."grootboekrekening" AS varchar(12)) = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0;
+
+-- de query: 
+-- SELECT * FROM VW_DAGBOEK ORDER BY scode, cast("subcode" as integer);;
+
+-- Uiteindelijk werkt onderstaande code in alle 4 dbase engines.
+-- Firebird en Postgresql kennen echter 'SIGNED' niet als fieldtype (geen standaard SQL).
+-- Fb en PG gebruiken 'INTEGER'.
+-- sqlite3 maakt het kennelijk niet uit omdat het type-loos is.
+
+-- In Fb en PG declareren we eerst een 'domain' die van 'SIGNED' een alias maakt voor Integer:
+CREATE DOMAIN SIGNED AS Integer DEFAULT 0;
+
+-- Als je onderstaande create in Mysql in niet ANSI mode invoert, eerst invoeren:
+--   set SESSION sql_mode='ANSI_QUOTES,PIPES_AS_CONCAT';
+
+CREATE VIEW VW_DAGBOEK 
+AS 
+SELECT s."code" AS code, s."subcode", d."grootboekrekening", s."naam"
+FROM "dagboeken" AS d 
+INNER JOIN "stamgegevens" AS s 
+ON (CAST(d."grootboekrekening" AS char(8)) = s."value")
+WHERE s."code"='e' AND d."grootboekrekening" <> 0 
+ORDER BY s."code", CAST(s."subcode" AS SIGNED);
+
+GRANT DELETE, INSERT, REFERENCES, SELECT, UPDATE
+ ON VW_DAGBOEK2 TO  SYSDBA WITH GRANT OPTION;
+
+
+-- -----------------
+-- CASTS
+-- -----------------
+-- Een standaard sql CAST bestaat uit:
+-- CAST( x AS typedef)
+SELECT * FROM grootboeksaldi WHERE boekjaar=2008 ORDER BY CAST(nummer AS varchar(4));
+
+-- Postgresql kent ook een andere cast-syntax:
+SELECT * FROM grootboeksaldi WHERE boekjaar=2008 ORDER BY nummer::varchar(4);
+
+
+

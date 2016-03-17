@@ -1,0 +1,591 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _aform.lib 291 2015-01-05 10:16:48Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+/** {{{1
+* ML design & techniek
+* Frank Kooger
+* 28 november 2005
+*
+* Deze class construeert een formulier in de grey/white weergave
+* van typo3.
+*
+* Aanroep:
+*
+$form = new aForm($render->body);
+$form->formStart(formnaam, action, [array(hiddens)] )
+  $form->mainTableStart();
+    $form->fieldSetStart([legend], [array(help,helpid,helpgroep)])
+      $form->blockLine([color], array(fields), [$array(tdparms)]
+      ..
+      $form->blockLine([color], array(fields), [$array(tdparms)]
+    $form->fieldSetBridge([legend], [array(help,helpid,helpgroep)]); # seperator, optioneel indien nog een fieldSetStart etc. erna
+      $form->blockLine([color], array(fields), [$array(tdparms)]
+      ..
+      $form->blockLine([color], array(fields), [$array(tdparms)]
+    $form->fieldSetEnd();
+  $form->mainTableEnd();
+$form->formEnd();
+
+* 
+* Let in het bijzonder op de aanroep van $obj->blockLine(var color,array fields,array tdparms)
+* tdparms worden aan '<td ' toegevoegd en zijn niet verplicht.
+* Voor de werking van color: 1, 2 of 3 is een voor-ingestelde kleur
+*                            0 of leeg is switchen tussen 1 en 2
+*                            #FFFFFF of RED worden direct ingesteld
+*
+* $this->innertable staat standaard op 1 en betekent: zet table tags tussen de fieldsets
+* zodat de blockLines in een table worden geprint. Soms wil je geen table tags om
+* zelf een opgemaakte table tussen fieldsets te willen plaatsen. Doe dit door
+* $this->innertable = false  voor de volgende fieldSetBridge te plaatsen. Dit werkt
+* vervolgens 1 keer dus alleen tijdens de doorgang van de volgende fieldSet
+
+* A typical session is:
+
+$form = new aForm($render->body);
+
+$form->formStart('frm1', $_SERVER['PHP_SELF'], 
+                   array(
+                          "aktie"=>"",
+                          "Samenvatting"=>"0"
+                         ) );
+
+  $form->mainTableStart();
+
+  // Eerste fieldblock 
+
+    $form->fieldSetStart('Selecteren gebruikerstype',
+                         array('help','export_gebruikerstype','export gebruikerstype'));
+
+      $form->blockLine('2',
+                       array("Gebruikerstype:",
+                             "",
+                             $selectbox) );
+
+      $form->blockLine('',
+                       array("Actief:",
+                             "",
+                             "Ja: <input type='radio' name='disable' value='0' onClick='zetverander();' {$checked['disable'][0]} /> 
+                             &nbsp;&nbsp;&nbsp;
+                              Nee: <input type='radio' name='disable' value='1' onClick='zetverander();' {$checked['disable'][1]} />") );
+
+  // Tweede fieldblock 
+
+    $form->fieldSetBridge("Overzicht");
+
+      $form->blockLine('2', 
+                       array("<img src='/img/clear.gif' width='10' height='14' hspace='2' border='0' align='left' />",
+                             nl2br($message) ) );
+
+  // organisaties
+
+    $form->fieldSetBridge('Selecteren organisatie(s)',
+                         array('help','export_orgpick','selecteer organisties'));
+
+      $form->blockLine('2', 
+                       array("",
+                             $orgpick),
+                       array("width='40%' style='white-space: nowrap'","width='60%'") );
+
+  // exporttype
+
+    $form->fieldSetBridge('Selecteren uitvoertype',
+                         array('help','export_type','exporttype'));
+
+      $form->blockLine('2', 
+                       array("<br /><div align='left' style='font-weight:bold;'>Mijn organisatie(onderdeel) staat er niet bij</div>"),
+                       array("colspan='3'") );
+
+      $form->blockLine('2', 
+                       array("Etiketten - XML:",
+                             array("help", "export_etikettenxml", "export etiketten XML"),
+                             "<input type='radio' name='Uitvoertype' value='1' {$checked['uitvoertype'][1]} /> &nbsp;" ),
+                       array("width='40%' style='white-space: nowrap'","", "width='60%'") );
+
+      $form->blockLine('', 
+                       array("Etiketten - CSV:",
+                             array("help", "export_etikettencsv", "export etiketten CSV"),
+                             "<input type='radio' name='Uitvoertype' value='2' {$checked['uitvoertype'][2]} /> &nbsp;" ),
+                       array("width='40%' style='white-space: nowrap'","", "width='60%'") );
+
+  // doelgroepgegevens
+
+  if( $r->gebruikerstype & (WWW | TIJDELIJK))  {
+
+    $form->fieldSetBridge('Selecteren overige criteria',
+                         array('help','export_overige','export overige criteria'));
+
+      $form->blockLine('2', 
+                       array("Wie Weet Wat:",
+                             "",
+                             "NR: <input type='radio' name='ShowWieWeetWat' value='9' {$checked['www'][9]} /> 
+              &nbsp;&nbsp;
+              Zichtbaar: <input type='radio' name='ShowWieWeetWat' value='1' {$checked['www'][1]} /> 
+              &nbsp;&nbsp;
+              Niet zichtbaar: <input type='radio' name='ShowWieWeetWat' value='0' {$checked['www'][0]} /> &nbsp;"),
+                       array("nowrap='nowrap', width='80'","","width='80%'") );
+
+      $form->blockLine('', 
+                       array("Jaarboek:",
+                             "",
+                             "NR: <input type='radio' name='ShowJaarboek' value='9' {$checked['jaarboek'][9]} /> 
+              &nbsp;&nbsp;
+              Opgenomen: <input type='radio' name='ShowJaarboek' value='1' {$checked['jaarboek'][1]} /> 
+              &nbsp;&nbsp;
+              Niet opgenomen: <input type='radio' name='ShowJaarboek' value='0' {$checked['jaarboek'][0]} /> &nbsp;"),
+                       array("nowrap='nowrap', width='80'","","width='80%'") );
+
+  } // END doelgroepgegevens
+
+  // sorteren
+
+    $form->fieldSetBridge('Sorteren',
+                         array('help','export_sort','export sorteren'));
+
+      $form->blockLine('2', 
+                       array("Sorteerveld 1:",
+                             "",
+                             $sorteerbox1),
+                       array("style='white-space: nowrap', width='80'","","width='80%'") );
+
+      $form->blockLine('', 
+                       array("Sorteerveld 2:",
+                             "",
+                             $sorteerbox2),
+                       array("style='white-space: nowrap', width='80'","","width='80%'") );
+
+  // Buttonblock
+
+    $form->fieldSetBridge();
+
+      $buttons=<<<EOT
+        <input type="button" name="B_uitvoeren" value="uitvoeren" onClick="var x=document.forms[0];x.aktie.value='uitvoeren';sendForm('')"/>
+        <input type="button" name="B_samenvatting" value="samenvatting" size="10" onClick="var x=document.forms[0];x.Samenvatting.value='1';x.aktie.value='uitvoeren';sendForm('')"/>
+        <input type="reset" name="B_reset" value="reset" />
+        <input type="button" name="B_sluiten" value="sluiten" onClick="window.close()"/>
+
+EOT;
+
+      $form->blockLine('2',array($buttons));
+
+
+    $form->fieldSetEnd();
+
+  $form->mainTableEnd();
+$form->formEnd();
+
+1}}} */
+
+Class aForm{ // {{{1
+  var $color1; // lightgray
+  var $color2; // darkgray
+  var $color3; // adminred
+  var $modus  = 0;
+  var $block  = '';
+  var $fieldsetextra = '';
+  var $innertable = 1;
+  var $linecolor = 0;
+
+
+  /* ****************************************************************
+  * @METHOD:   aForm() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  public function __construct(&$block, $modus = '') {
+    global $config;
+
+    // Let op: als $block moet worden gezien als het adres
+    // naar een bestaand block in de aanroepende module
+    // dan moet $block in die module al bestaan.
+    $this->modus = ($modus == 'print') ? 1 : 0;
+    $this->block = &$block;
+    $this->color1 = isset($config->data['color']['lightgray'])  ? $config->data['color']['lightgray']  : '#e4e0db'; 
+    $this->color2 = isset($config->data['color']['darkgray'])   ? $config->data['color']['darkgray']   : '#cbc7c3'; 
+    $this->color3 = isset($config->data['color']['admin'])      ? $config->data['color']['admin']      : '#edbbbb'; 
+    $this->color4 = isset($config->data['color']['blueheader']) ? $config->data['color']['blueheader'] : '#a9d0ff'; 
+    $this->color5 = isset($config->data['color']['banksaldo'])  ? $config->data['color']['banksaldo']  : '#805353';
+    $this->lprint = '';
+    $this->dprint = '';
+
+  } // END FUNCTION __construct }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   formStart() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function formStart($name, $action, $hidden='') {
+    $this->lprint(0,"<form name='{$name}' id='actionForm' action='{$action}' enctype='multipart/form-data' method='post'>");
+    if(is_array($hidden)) {
+      foreach($hidden AS $key=>$val) {
+        $this->lprint(2,"<input type='hidden' name='{$key}' value='{$val}' />");
+      }
+      $this->lprint(0);
+    }
+
+  } // END FUNCTION formStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   formEnd() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function formEnd() {
+    $this->lprint(0,"</form>");
+
+  } // END FUNCTION formEnd }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   mainTableStart() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function mainTableStart($arg='') {
+    if($arg)
+      $this->lprint(2, "<table {$arg}>");
+    else
+      $this->lprint(2, "<table width='100%' border='0'>");
+    $this->lprint(4, "<tr>");
+    $this->lprint(6, "<td>");
+    $this->lprint(0);
+
+  } // END FUNCTION mainTableStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   mainTableSep() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function mainTableSep() {
+    $this->lprint(6, "</td>");
+    $this->lprint(4, "</tr>");
+    $this->lprint(4, "<tr>");
+    $this->lprint(6, "<td>");
+    $this->lprint(0);
+
+  } // END FUNCTION mainTableSep }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   mainTableEnd() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function mainTableEnd() {
+    $this->lprint(6, "</td>");
+    $this->lprint(4, "</tr>");
+    $this->lprint(2, "</table>");
+    $this->lprint(0);
+
+  } // END FUNCTION mainTableEnd }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   fieldSetStart() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function fieldSetStart($legend='',$help='',$margin='',$arg='',$id='') {
+    $id and $id = ' id=\''.$id.'\'';
+    $fieldset = ($margin) ? "<fieldset{$id} style='margin-bottom:{$margin}px;'>" : "<fieldset{$id}>" ;
+    $this->lprint(8, $fieldset);
+    $legend and $this->lprint(10, "<legend>{$legend}");
+    if(is_array($help)) {
+      list($type, $a, $b) = $help;
+      $this->dprint(' &nbsp; '.$this->hmake($a, $b) ."\n");
+      $this->lprint(10, '</legend>');
+    }
+    else { // geen help maar wel legend einde indien legend
+      $legend and $this->lprint(10, "</legend>");
+    }
+    $this->lprint(0);
+    ! empty($this->fieldsetextra) ? $this->lprint(10, $this->fieldsetextra) : null ;
+    $this->blockTableStart($arg);
+
+  } // END FUNCTION fieldSetStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   fieldSetBridge() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function fieldSetBridge($legend='',$help='',$margin='',$arg='',$id='') {
+    $this->fieldSetEnd();
+    $this->mainTableSep();
+    $this->fieldSetStart($legend,$help,$margin,$arg,$id); 
+
+  } // END FUNCTION fieldSetBridge }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   fieldSetEnd() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function fieldSetEnd() {
+    $this->blockTableEnd();
+    $this->lprint(8, '</fieldset>');
+    $this->lprint(0);
+
+  } // END FUNCTION fieldSetEnd }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   blockTableStart() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function blockTableStart($arg='') { // innertable staat op scherp, print geen begin-tabletag
+    if($this->innertable == 2) return(0);
+    if($arg)
+      $this->lprint(10, "<table {$arg}>");
+    else
+      $this->lprint(10, "<table border='0' cellpadding='2' cellspacing='0' width='100%' class='aform'>");
+    $this->lprint(0);
+
+  } // END FUNCTION blockTableStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   blockTableEnd() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function blockTableEnd() {
+    if(false == $this->innertable) { // ga de eerste keer door not-innertable, print hier nog de eind-table tag
+      $this->innertable = 2;         // en zet op scherp zodat in het volgende blok geen begin-table tag wordt geprint
+    }
+    else if($this->innertable == 2) { // dit is de tweede keer door not-innertable, print nu geen eind-table tag
+      $this->innertable = 1;          // en reset innertable weer naar normaal 
+      return(0); 
+    }
+    $this->lprint(10, '</table>');
+    $this->lprint(0);
+
+  } // END FUNCTION blockTableEnd }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   emptyFieldStart() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function emptyFieldStart() {
+    $this->lprint(8, '<tr>');
+    $this->lprint(10, '<td>');
+    $this->lprint(0);
+
+  } // END FUNCTION emptyFieldStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   emptyFieldEnd() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function emptyFieldEnd() {
+    $this->lprint(10, '</td>');
+    $this->lprint(8, '</tr>');
+    $this->lprint(0);
+
+  } // END FUNCTION emptyFieldEnd }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   blockLinex() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function blockLinex($color='1',$fields='',$tdparms='',$trparms='') {
+    // DUMMY FUNCTION
+    // bedoeld om (tijdelijk) formulierregels in weg te laten lopen
+
+  } // END FUNCTION blockLinex }}}
+
+  
+  /* ****************************************************************
+  * @METHOD:   blockLine() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function blockLine($color='1',$fields='',$tdparms='',$trparms='') {
+    global $config;
+
+    if(! $color) { // color = leeg, switch colors
+      $color = ($this->linecolor == 1) ? 2 : 1;
+    }
+    switch($color) {
+      case 1  : $this->linecolor = 1; $trstyle = "class='lightgray'"; break;
+      case 2  : $this->linecolor = 2; $trstyle = "class='darkgray'"; break;
+      case 3  : $this->linecolor = 3; $trstyle = "class='admin'"; break;
+      case 4  : $this->linecolor = 4; $trstyle = "class='blueheader'"; break;
+      case 5  : $this->linecolor = 5; $trstyle = "style='background:{$this->color5}'"; break;
+      case 'journaal'    : $trstyle = "<style='background:{$config->data['bgcolor']['journaal']}'"; break;
+      case 'grootboek'   : $trstyle = "<style='background:{$config->data['bgcolor']['grootboek']}'"; break;
+      case 'debiteuren'  : $trstyle = "<style='background:{$config->data['bgcolor']['debiteuren']}'"; break;
+      default : $trstyle = "style='background:{$color}'"; break;
+    }
+    if($trparms)
+      $this->lprint(12, "<tr {$trstyle} {$trparms}>");
+    else
+      $this->lprint(12, "<tr {$trstyle}>");
+
+    if(is_array($tdparms)) {
+      foreach($tdparms AS $key=>$val) {
+        $tdparm[$key] = (! empty($val) ? $val : '');
+      }
+    }
+    if(is_array($fields)) {
+      foreach($fields AS $key=>$val) {
+        $td = (! empty($tdparm[$key]) ? "<td {$tdparm[$key]}>" : "<td>");
+        if(is_array($val)) {
+          list($type, $a, $b) = $val;
+          if($type == 'help') {
+            $this->lprint(14,"{$td}". $this->hmake($a, $b) ."</td>");
+          }
+        }
+        else {
+          $this->lprint(14, "{$td}{$val}</td>");
+        }
+      }
+    } // END IF is_array($fields)
+    $this->lprint(12, '</tr>');
+    $this->lprint(0);
+
+  } // END FUNCTION blockLineStart }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   schemaHeader() 
+  * @SYLLABUS: 
+  *   print een headerrow boven de pagina. Vooral bedoeld voor printpagina's
+  *   voorwaarde is dat $GLOBALS['stam'] is gezet met daarin de stamgegevens.
+  *
+  *****************************************************************{{{ */
+  function schemaHeader($kop,$color='#805353',$fontcolor='white') {
+    global $config;
+
+    if(isset($GLOBALS['stam']->boekjaar)) {
+      $this->fieldSetStart("<b>$kop &nbsp; - &nbsp; Boekjaar: {$GLOBALS['stam']->boekjaar}</b>");
+      $this->blockLine($color,
+                       array("<div style='color:{$fontcolor}'>Administratie: ".$GLOBALS['stam']->adminnaam['value']."</div>"
+                             ,"<div style='color:{$fontcolor}'>Database: ".basename($config->data['db']['default'])."</div>"
+                             ,"<div style='color:{$fontcolor}'>Datum: ".$GLOBALS['timer']->vandaag."</div>"
+                             ),
+                       array("nowrap='nowrap', width='40%'","width='30%'","width='30%' align='right'") );
+    }
+    else {
+      $this->fieldSetStart("<b>$kop &nbsp; &nbsp; </b>");
+      $this->blockLine($color,
+                       array("<div style='color:{$fontcolor}'></div>"
+                             ,"<div style='color:{$fontcolor}'>Database: ".basename($config->data['db']['default'])."</div>"
+                             ,"<div style='color:{$fontcolor}'>Datum: ".$GLOBALS['timer']->vandaag."</div>"
+                             ),
+                       array("nowrap='nowrap', width='40%'","width='30%'","width='30%' align='right'") );
+    }
+
+  } // END FUNCTION schemaHeader }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   lprint() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function lprint($s=0, $item='') {
+    $s and $this->block .= str_pad(' ',$s);
+    $this->block .= $item."\n";
+
+  } // END FUNCTION lprint }}}
+  
+
+  /* ****************************************************************
+  * @METHOD:   dprint() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function dprint($item='') {
+    $this->block .= $item;
+
+  } // END FUNCTION dprint }}}
+  
+
+  /* ****************************************************************
+  * @METHOD:   hmake() 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  function hmake($a='', $b='') {
+    //return("<a href='#' onClick='Help(\"{$a}\",\"{$b}\");return false;'><img src='/img/helpbubble.gif' width='14' height='14' hspace='2' border='0' align='absmiddle' style='cursor:help;'></a>");
+    return("<span onClick='Help(\"{$a}\",\"{$b}\");return false;'><img src='/img/helpbubble.gif' width='14' height='14' hspace='2' border='0' align='absmiddle' style='cursor:help;'></span>");
+
+  } // END FUNCTION hmake }}}
+
+
+  /********************************************************************* 
+  * @METHOD: str messagePrint( bool $direct=false ) 
+  * @RETURNS:  string 
+  * @SYLLABUS:  
+  *   Print de foutberichten in $GLOBALS['msg']. In standaardmode
+  *   (direct==false) worden ze geinjecteerd in het bestaande form
+  *   object. In direct mode wordt een geformatteerde string teruggegeven die
+  *   op andere plaatsen of manieren kan worden geprint.
+  * 
+  /* *********************************************************************{{{ */ 
+  function messagePrint($direct=false) {
+    global $config, $msg;
+
+    if(! $direct) { // injecteer in het form object
+      if(!empty($msg['red'])) {
+        $tmp = '';
+        foreach($msg['red'] AS $val) $tmp .= $val."<br />\n";
+
+        $this->blockLine('',
+                         array("<div style='color:red;font-size:120%;'>{$tmp}</div>"), 
+                         array("colspan='5', nowrap='nowrap', width='100%'") );
+
+        $this->fieldSetBridge("");
+      }
+      if($config->data['debug']['messages']) { // print de blauwe messages indien messages
+        
+        if(!empty($msg['blue'])) {
+          $tmp = '';
+          foreach($msg['blue'] AS $val) $tmp .= $val."<br />\n";
+
+          $this->blockLine('',
+                           array("<div style='color:blue;font-size:100%;'>{$tmp}</div>"), 
+                           array("colspan='5', nowrap='nowrap', width='100%'") );
+
+        }
+      }
+    } // END IF ! direct
+
+  } // END METHOD messagePrint}}}
+
+} // END CLASS aForm 1}}}
+
+/* __END__ */

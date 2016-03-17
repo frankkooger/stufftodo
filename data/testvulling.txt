@@ -1,0 +1,7 @@
+Een testvulling is beschikbaar in struct/firebird:
+
+
+  testadministratie.vulling.firebird.1-3-2.sql
+
+evt de begin- en eindregel (TRANSACTION en COMMIT) weghalen voor dbases die dat niet verstaan.
+

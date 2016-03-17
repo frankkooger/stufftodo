@@ -1,0 +1,78 @@
+
+Install FireBird op Windows
+===========================
+
+Download een installatiepakket voor Windows.
+Installeer in de directory die default gegeven wordt tijdens installatie. In ons geval is dat:
+
+C:\Program Files\Firebird\Firebird_2_1
+
+Installeer de Super Server Binary en de Developer en Admin tool components (dit zijn de standaard keuzes).
+
+In het scherm 'Additional Tasks':
+
+- Use the Guardian to control the server
+- Run as an Application (in dit geval wordt FireBird gestart met
+    firebird-start.bat in de bin directory en na gebruik evt gestopt met de
+    Control Panel Applet. Als je alles automatisch wilt laten verlopen,
+    installeer dan als Service maar dan draait FB altijd op de achtergrond.
+    Voor een PC die hoofdzakelijk voor de administratie wordt gebruikt is dit
+    wrsch de beste optie)
+- Install Control Panel Applet
+- Generate client library as GDS32.DLL (dit is niet nodig als je de bijgeleverde PHP52 gebruikt)
+  Lees verder:
+If you have this problem:
+
+Warning: ibase_connect(): Unable to complete network request to host "localhost"
+. Failed to locate host machine. Undefined service gds_db/tcp.  in C:\\wamp\\php\\ibase.php on line 5
+
+This is because php is deployed with old client library gds32.dll.
+
+To resolve this, update this library to Firebird latest version of fbclient.dll, of course, rename it to gds32.dll and overwrite into php dir.
+
+Or simply don't use localhost ou 127.0.0.1, use computer name.
+
+
+
+Install FireBird op Linux met 'Yum' flavour (RedHat, Fedora, CentOs)
+====================================================================
+
+fetch de .rpm file op
+  http://www.firebirdsql.org/index.php?op=files
+
+installeer locaal met yum. Yum houdt dan rekening met afhankelijkheden en laadt een libstdc++ legacy file
+# yum --localinstall <firebird.rpm>
+
+Dit installeert standaard in /opt/firebird
+
+Er is nu een aantal aanpassingen te doen. Daarvoor staan in /opt/firebird/bin een aantal .sh files:
+
+# changeDBAPassword.sh
+Het meegeleverde sysdba password staat in /opt/firebird/SYSDBA.password
+Gebruik dit password om een nieuw password aan te maken met genoemd script
+
+# changeRunUser.sh
+Origineel draait firebird onder root:root. Als je genoemd script draait dan verandert dat in firebird:firebird
+Je kan de databases opslaan in /pub/webs/openadministratie/dbase (met schrijf-groepsrechten) door user firebird op te nemen in groep svnadmin
+
+De tool 'isql' staat in /opt/firebird/bin . Het is handig om een link te maken naar /pub/webs/openadministratie/dbase (of ../bin).
+
+Maak een database aan:
+# isql<Enter>
+SQL> CREATE DATABASE "administratie.fdb" USER 'sysdba' PASSWORD 'OpenAdmin.nl';
+SQL> commit;
+
+
+Install FireBird op Ubuntu
+==========================
+
+Gebruik de Ubuntu package manager 'System > Administration > Synaptic Package Manager', gebruik 'Search' en zoek op 'Firebird'. Uit de resultaten kies tenminste:
+- firebird2.1.super
+- php5-interbase
+
+Handige extra's:
+- flamerobin
+
+Ubuntu installeert de Firebird bestanden niet bij elkaar in '/opt/firebird' maar in '/usr/lib/firebird/2.1'. De gebruikersshell is '/usr/bin/isql-fb'.
+
+

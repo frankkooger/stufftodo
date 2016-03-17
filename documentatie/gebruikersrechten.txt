@@ -1,0 +1,52 @@
+Om met een administratie in OpenAdmin.nl te kunnen werken zijn enkele voorwaarden te voldoen.
+
+Databasegebruiker
+=================
+-----
+Mysql
+-----
+De databasegebruiker moet meer rechten hebben dan alleen lezen en muteren van
+tabellen.  In SQL termen zijn het de volgende global rechten:
+
+REVOKE ALL PRIVILEGES ON * . * FROM 'webuser'@'localhost';
+REVOKE GRANT OPTION ON * . * FROM 'webuser'@'localhost';
+GRANT SELECT ,
+INSERT ,
+UPDATE ,
+DELETE ,
+CREATE ,
+DROP ,
+INDEX ,
+ALTER ,
+LOCK TABLES ,
+CREATE VIEW ,
+SHOW VIEW ,
+CREATE ROUTINE,
+ALTER ROUTINE ON * . * TO 'webuser'@'localhost' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0 ;
+
+Overigens zijn in de huidge sql versie 1.2.0 geen VIEWS en ROUTINES zodat die 4
+items weggelaten kunnen worden.
+
+--------
+Firebird
+--------
+De Firebird gebruiker is default 'SYSDBA' password 'OpenAdmin.nl'. Dit kan naar
+behoefte worden veranderd mbv de tools die Firebird daarvoor beschikbaar stelt.
+
+-------
+Sqlite3
+-------
+Sqlite3 kent geen databasegebruikers. De enige voorwaarde is dat de webuser of
+webgroup (zie hieronder) schrijfrechten heeft in de directory waarin de sqlite3
+database is opgeslagen: '<fileadmin>/dbase'.
+
+
+
+httpd gebruiker
+===============
+De httpd gebruiker of de gebruikergroep moet op enkele plaatsen bestanden kunnen
+wegschrijven dus schrijfrechten hebben in de directories:
+
+- <fileroot>/conf  - alleen tijdens installatie van OpenAdmin.nl
+- <fileroot>/dbase  - voor het wegschrijven van backups
+

@@ -1,0 +1,337 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _help.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+require_once('_dbasepdo.lib');
+
+
+Class Helptopic extends PDOConnector {
+  var $HELPcode='';
+  var $HELPrubriek='';
+  var $HELPtext='';
+  var $HELPtitel='';
+  var $HELPlink='';
+  var $onbekend=true;
+  var $discardNieuw=false;
+  var $discardLocal=false;
+  var $discardRemote=true;
+  var $button=array();
+  var $oricode='';
+  var $orilink='';
+
+  public function __construct($code) {
+    $this->isAdministrator();
+    // moeten we hulp vragen bij de remotehost indien het helptopic locaal niet is gevonden?
+    if(isset($GLOBALS['config']->data['help']['discardRemote'])) 
+        $this->discardRemote = $GLOBALS['config']->data['help']['discardRemote']; 
+    // open een database-object indien er locaal een database beschikbaar is.
+    if(is_file($GLOBALS['config']->data['dir']['dbase'].'/help.db3') &&
+        filesize($GLOBALS['config']->data['dir']['dbase'].'/help.db3') > 0) {
+      parent::__construct('','','',$GLOBALS['config']->data['dir']['dbase'].'/help.db3','sqlite');
+    }
+    else 
+      $this->discardLocal = true;
+    // controleer of local of remote helpsysteem beschikbaar is. Anders stoppen
+    $this->checkHelpsystem();
+  } // END CONSTRUCTOR Helptopic
+
+  function checkHelpsystem() {
+    if($this->discardLocal && $this->discardRemote) {
+      die( <<<EOT
+<body onLoad="window.focus()">
+<p style='padding:20px;font-family:arial,helvetica,sans-serif;font-weight:bold' align='center'>Er is geen helpsysteem beschikbaar!</p>
+<p style='font-family:arial,helvetica,sans-serif' align='center'>kijk op de: <a href='http://wiki.openadmin.nl/' target='_new'>OpenAdmin Wiki</a> voor meer info.</p>
+</body>
+EOT
+);
+    }
+  } // END FUNCTION checkHelpsystem
+
+  function isAdministrator() {
+    $this->administrator = $GLOBALS['config']->data['help']['administrator'];
+  } // END FUNCTION isAdministrator
+
+  // dbase functies
+  
+  function load(&$p) {
+    // load local indien dat zo is ingesteld of indien er een locale database is.
+    // laad anders remote
+    if($this->discardLocal && ! $this->discardRemote) {
+      $this->getRemote($p);
+    }
+    else {
+      list($this->HELPcode, $this->HELPrubriek, $this->HELPlink, 
+           $this->HELPtitel, $this->HELPtext) = 
+        $this->Get_fields(array('"HELPcode"','"HELPrubriek"','"HELPlink"','"HELPtitel"','"HELPtext"'), '"HELP"', "\"HELPcode\"='{$p->code}' AND \"HELPrubriek\"='{$p->rubriek}' ", basename(__FILE__).'::'.__METHOD__.'::'.__LINE__);
+    }
+    $this->oricode = ($p->oricode) ? $p->oricode : '';
+
+  } // END FUNCTION load
+
+
+  // Haal content van de remote help.openadmin.nl
+  // Doe dit alleen als het in de configuratie aanstaat
+  //
+  function getRemote(&$p) {
+    if($this->discardRemote) return(false);
+    $url = rtrim($GLOBALS['config']->data['help']['remoteHost'],'/'); 
+    $url .= "/".$p->rubriek."/".$p->code;
+    $tekst = file_get_contents($url);
+    // Zorg dat geen nieuw button wordt getoond.
+    $this->discardNieuw = true;
+    $this->HELPtext = $tekst;
+  } // END FUNCTION getRemote
+
+
+  function fill(&$p) {
+    // We kunnen hier een p object of een help object aanbieden dus we moeten een routine inbouwen om beide formaten te kunnen lezen.
+    if(isset($p->code)) $this->HELPcode = $p->code;
+    elseif(isset($p->HELPcode)) $this->HELPcode = $p->HELPcode;
+    if(isset($p->rubriek)) $this->HELPrubriek = $p->rubriek;
+    elseif(isset($p->HELPrubriek)) $this->HELPrubriek = $p->HELPrubriek;
+    if(isset($p->link)) $this->HELPlink = $p->link;
+    elseif(isset($p->HELPlink)) $this->HELPlink = $p->HELPlink;
+    if(isset($p->titel)) $this->HELPtitel = $p->titel;
+    elseif(isset($p->HELPtitel)) $this->HELPtitel = $p->HELPtitel;
+    if(isset($p->text)) $this->HELPtext = $p->text;
+    elseif(isset($p->HELPtext)) $this->HELPtext = $p->HELPtext;
+    if(isset($p->oricode)) $this->oricode = $p->oricode;
+    elseif(isset($p->oricode)) $this->oricode = $p->oricode;
+  } // END FUNCTION fill
+
+
+  function fillGeenRecord(&$p) {
+    $this->HELPlink='';
+    $this->HELPrubriek='';
+    $this->HELPcode='';
+    $this->HELPtitel='Geen record';
+    $this->HELPtext="Record: {$p->code} is verwijderd";
+  } // END FUNCTION fillGeenRecord
+
+
+  function exists(&$p) {
+    // load local indien dat zo is ingesteld of indien er een locale database is.
+    // laad anders remote
+    if($this->discardLocal && ! $this->discardRemote) {
+      return(false);
+    }
+    return($this->Get_field('COUNT("*")', '"HELP"', "\"HELPcode\"='{$p->code}' AND \"HELPrubriek\"='{$p->rubriek}' ", basename(__FILE__).'::'.__METHOD__.'::'.__LINE__) );
+  } // END FUNCTION exists
+
+  function edit(&$p) {
+  } // END FUNCTION edit
+
+  function nieuw(&$p) {
+    if($this->administrator ) {
+      $titel = $this->Prepare($p->titel);
+      $query = 'INSERT INTO "HELP" ("HELPcode","HELPrubriek","HELPlink","HELPtitel","HELPtext")'
+              ." VALUES ('{$p->code}', '{$p->rubriek}', '{$p->link}', '{$titel}', '') ";
+      return($this->Do_query($query, basename(__FILE__).'::'.__METHOD__.'::'.__LINE__) ? true : false );
+    }
+    return(false);
+  } // END FUNCTION nieuw
+
+  function delete(&$p) {
+    if($this->administrator ) {
+      return(($this->Delete_record('"HELP"', "\"HELPcode\"='{$p->code}' AND \"HELPrubriek\"='{$p->rubriek}'", basename(__FILE__).'::'.__METHOD__.'::'.__LINE__)) ? true : false );
+    }
+    return(false);
+  } // END FUNCTION delete
+
+  function save(&$p) {
+    if($this->administrator ) {
+      $text = $this->Prepare($p->tekst);
+      $titel = $this->Prepare($p->titel);
+      // Denk eraan dat sqlite::quote ook apostrophes aan het begin en eind van
+      // de string zet. Dus die weglaten in het SQL statement.
+      $query = "UPDATE \"HELP\" "
+              ." SET \"HELPtext\"='{$text}',\"HELPtitel\"='{$titel}',\"HELPlink\"='{$p->link}',\"HELPrubriek\"='{$p->rubriek}'"
+              ." WHERE \"HELPcode\"='{$p->code}' AND \"HELPrubriek\"='{$p->rubriek}'";
+      return($this->Do_query($query, basename(__FILE__).'::'.__METHOD__.'::'.__LINE__) ? true : false );
+    }
+    return(false);
+  } // END FUNCTION save
+
+  // scheidt de string rubriek.code
+  function sep($str) {
+    $str = preg_replace("/\.\./", ".", $str); // verwijder evt twee punten in de code
+    if(preg_match("/^(.*)\.(.*)$/", $str, $ar)) {
+      array_shift($ar);
+      return($ar);
+    }
+    else
+      return(false);
+  } // END FUNCTION sep
+
+
+  // renderfuncties
+
+  function renderUsertekst($helptekst) {
+  } // END FUNCTION renderUsertekst
+
+
+  function verwijderButton(&$p) {
+    if($this->administrator) {
+      $this->button['verwijder'] = "      <input class='esmall' type='button' value='verwijder' onClick=\"verwijder('{$this->HELPrubriek}.{$this->HELPcode}','{$this->HELPtitel}');\" />\n";
+    }
+  } // END FUNCTION verwijderButton 
+
+
+  function terugButton(&$p) {
+      $this->button['terug'] = "      <input class='esmall' type='button' value='terug' onClick=\"terug();\" />\n";
+  } // END FUNCTION terugButton 
+
+
+  function nieuwButton(&$p) {
+    if($this->administrator)
+      $this->button['nieuw'] = "      <input class='esmall' type='button' value='nieuw' onClick=\"nieuw('{$p->rubriek}.{$p->code}','{$p->titel}');\" />\n";
+  } // END FUNCTION nieuwButton 
+
+
+  function indexButton() {
+      $this->button['index'] = "      <input class='esmall' type='button' value='help-index' onClick=\"index();\" />\n";
+  } // END FUNCTION indexButton 
+
+
+  function opslaanButton(&$p) {
+    if($this->administrator) 
+      $this->button['opslaan'] = "      <input class='esmall' type='submit' value='opslaan' onClick=\"document.forms['frm1'].aktie.value='opslaan';\" />\n";
+  } // END FUNCTION opslaanButton 
+
+
+  function wijzigLinkButton() {
+      $this->button['wijzigLink'] = "      <input class='esmall' type='button' value='wijzig link' onClick=\"editlink('{$this->oricode}');\" />\n";
+  } // END FUNCTION wijzigLinkButton 
+
+
+  function wijzigButton(&$p) {
+    if($this->administrator) {
+      $this->button['wijzig'] = "      <input class='esmall' type='button' value='wijzigen' onClick=\"edit('{$this->HELPrubriek}.{$this->HELPcode}','{$this->oricode}');\" />\n";
+    }
+  } // END FUNCTION editButton 
+
+
+  function terugVanWijzigButton() {
+    $target = ($this->oricode) ? $this->oricode : $this->HELPrubriek.'.'.$this->HELPcode ;
+      $this->button['terugVanWijzig'] = "      <input class='esmall' type='button' value='terug' onClick=\"terugVanWijzig('{$target}');\" />\n";
+  } // END FUNCTION wijzigLinkButton 
+
+
+  function sluitenButton() {
+      $this->button['sluiten'] = "      <input class='esmall' type='button' value='sluiten' onClick=\"window.close();\" />\n";
+  } // END FUNCTION sluitenButton 
+
+
+  function Nope() {
+    return("<p align='center' style='margin:20px;'><b>Sorry, (nog) geen help beschikbaar voor dit onderwerp.</b></p>"
+          ."<hr width=80% />");
+  } // END FUNCTION Nope 
+
+
+  function renderNormal(&$form) {
+
+    $this->oricode .= ($this->oricode) ? ' -> ' : '';
+    // indien deze pagina is een verwijzing, print ook het origineel
+
+    $buttons = $this->renderButtons();
+
+    $form->dprint( <<<EOT
+    <div id='container' class='darkgray'>
+      <div id="apDiv1"><div class='innerC darkgray'>{$this->HELPtitel}</div></div>
+      <div id="apDiv2"><div class='innerD lightgray'>{$this->HELPtext}</div></div>
+      <div id="apDiv3"><div class='innerC darkgray' style='text-align:center;'>
+      {$buttons}
+      </div>
+      <div id="apDiv4"><div class='innerC darkgray' style='text-align:right;font-size:60%;'>{$this->oricode}{$this->HELPrubriek}.{$this->HELPcode}</div>
+    </div>
+
+EOT
+);
+    $form->formEnd();
+    $form->dprint("</div>");
+
+  } // END FUNCTION renderNormal
+
+
+  function renderEditform(&$form) {
+    if(!$this->administrator) return(false);
+    
+    $this->oricode .= ($this->oricode) ? ' -> ' : '';
+    // indien deze pagina is een verwijzing, print ook het origineel
+
+    // obsolete
+    // $helptext  = preg_replace("/<br[ ]?[\/]?@@@>/i","\n",$this->HELPtext);
+
+      $form->mainTableStart();
+      $form->fieldSetStart('Editform');
+
+      $form->blockLine('',
+                       array('Linknaar: '
+                            ,"<input type='text' size='40' name='link' value='{$this->HELPlink}' />"),
+                       array() );
+
+      // Neem een hidden veld 'command' op zodat het record wordt ge-update.
+      // Als je op de save knop van tinymce klikt gebeurt er een 'submit' en
+      // kunnen we geen 'aktie' invullen.
+      //
+      $form->blockLine('',
+                       array('Titel: '
+                            ,"<input type='text' size='40' name='titel' value='{$this->HELPtitel}' />"
+                            ."<input type='hidden' name='command' value='opslaan' />"),
+                       array() );
+
+      $form->blockLine('',
+                       array(
+                             "<textarea cols='40' rows='15' name='tekst' style='width:100%'>{$this->HELPtext}</textarea>"),
+                       array("colspan='2'") );
+
+      $form->blockLine('',
+                       array($this->renderButtons()),
+                       array("align='center' colspan='2'") );
+
+      $form->fieldSetBridge();
+
+      // code als laatste regel printen in grijs
+      //
+        $form->blockLine('',
+                         array($this->oricode.$this->HELPrubriek.'.'.$this->HELPcode),
+                         array("align='right' style='font-size:70%;' ") );
+
+          $form->fieldSetEnd();
+        $form->mainTableEnd();
+      $form->formEnd();
+
+  } // END FUNCTION renderEditform
+
+
+  // Maak een string van de button array
+  //
+  function renderButtons() {
+    $tmp = '';
+    foreach($this->button AS $val) 
+      $tmp .= $val."\n";
+    return($tmp);
+  } // END FUNCTION renderButtons
+
+
+} // END CLASS Helptopic
+
+?>

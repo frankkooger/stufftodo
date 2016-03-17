@@ -1,0 +1,315 @@
+<?php // vim: syntax=php so=100
+
+Class BTW {
+  public $periodestring = '';
+
+
+  public function __construct() {
+    ;
+  }
+
+  public function existRkg($key) {
+    global $stam;
+    return($rekening = $stam->Get_field("nummer",$stam->grootboekstam,"\"btwkey\" LIKE '{$key}'",
+            basename(__FILE__).'::'.__FUNCTION__.'::'.__LINE__)) ? $rekening : false;
+  } // END METHOD existRkg
+
+
+  function boekdatum(&$p) {
+    global $stam;
+
+    if(!empty($p->periode)) {
+      if($stam->periodetot['value'] == 4)
+        switch($p->periode) {
+          case 1  : $datum = '03-31'; break;
+          case 2  : $datum = '06-30'; break;
+          case 3  : $datum = '09-30'; break;
+          case 4  : 
+          case 5  : $datum = '12-31'; break;
+        }
+      elseif($stam->periodetot['value'] == 12)
+        switch($p->periode) {
+          case 1  : $datum = "01-31"; break;
+          case 2  : if ( $stam->boekjaar % 4 == 0)  { 
+                      if (($stam->boekjaar % 100 == 0) && ($stam->boekjaar % 400 > 0))  $datum = '02-28';
+                      else  $datum = '02-29';
+                    }
+                    else $datum = '02-28'; 
+                    break;
+          case 3  : $datum = '03-31'; break;
+          case 4  : $datum = '04-30'; break;
+          case 5  : $datum = '05-31'; break;
+          case 6  : $datum = '06-30'; break;
+          case 7  : $datum = '07-31'; break;
+          case 8  : $datum = '08-31'; break;
+          case 9  : $datum = '09-30'; break;
+          case 10 : $datum = '10-31'; break;
+          case 11 : $datum = '11-30'; break;
+          case 12 :
+          case 13 : $datum = '12-31'; break;
+        }
+      return($stam->boekjaar."-".$datum);
+    }
+    return(false);
+
+  } // END METHOD boekdatum
+
+
+  function periodeStringFill(&$p) {
+    global $stam;
+
+    // periodecheckboxes: Maak gelijk het stukje AND sql voor de periodeselectie in de selectiequerys verderop
+    //
+    $whereperiode = '';
+    $first = true;
+
+    for($i=1;$i<=$stam->periodetot['value'];$i++) {
+      //
+      // periodestring en sql maken
+      //
+      if($i == $p->periode) {
+        // sql maken
+        if($first) { $whereperiode .= " AND j.\"periode\" IN ({$i},"; $first = false; }
+        else         $whereperiode .= "{$i},";
+        // periodestring
+        $this->periodestring .= "{$i}:<input type='radio' name='periode' value='{$i}' onClick='doLoad(this);' "
+                               ."checked='checked' /> &nbsp;\n"; 
+      }
+      else {
+        $this->periodestring .= "{$i}:<input type='radio' name='periode' value='{$i}' onClick='doLoad(this);' /> &nbsp;\n";
+      }
+    }
+    // bij een lege periode (het beginscherm) een dummy waarde ingeven
+    (empty($p->periode)) and $whereperiode  = 'AND (j."periode" = 0 ';
+    // whereperiodestring afronden
+    ($whereperiode) and $whereperiode = substr($whereperiode,0,-1) . ")";
+printrc2($this, 'obj is nu: ');
+printrc2($whereperiode, 'whereperiode1 is nu: ');
+    return($whereperiode);
+
+  } // END METHOD periodeStringFill }}}
+
+
+
+  /********************************************************************* 
+  * @METHOD: str periodeWhere( )
+  * @RETURNS: string
+  * @SYLLABUS:  
+  *   maak een stukje sql WHERE code voor selectie van periode(s)
+  *
+  /* *********************************************************************{{{ */ 
+  function periodeWhere($periode) {
+    global $stam;
+
+    $whereperiode = '';
+    $first = true;
+
+    for($i=1;$i<=$stam->periodetot['value'];$i++) {
+      //
+      // periode sql maken
+      //
+      if($i == $periode) {
+        // sql maken
+        if($first) { $whereperiode .= " \"periode\" IN ({$i},"; $first = false; }
+        // Indien de laatste reguliere perioder v.h. boekjaar, voeg de extra periode toe
+        if($periode == $stam->periodetot['value']) $whereperiode .= "{$stam->periodeextra['value']},";
+      }
+    }
+    // whereperiodestring afronden
+    ($whereperiode) and $whereperiode = substr($whereperiode,0,-1) . ")";
+printrc2($whereperiode, 'whereperiode2 is nu: ');
+    return($whereperiode);
+
+  } // END METHOD periodeWhere }}}
+
+
+
+  /********************************************************************* 
+  * @METHOD: arr getKeyList( )
+  * @RETURNS: array: keys met acode als index
+  * @SYLLABUS:  
+  *    Maak een array met btw keys met acode als index:
+  *    '1a'=>'rkg_btwverkoophoog' enz.
+  * 
+  /* *********************************************************************{{{ */ 
+  function getKeyList() {
+    global $stam;
+    $arr = array();
+    $stam->query = 'SELECT "key","acode" FROM '.$stam->btwkeys.' WHERE "acode" NOT LIKE \'\' ORDER BY "acode"'; 
+    $stam->Do_sql();
+    while($obj = $stam->Do_object()) {
+      $arr[$obj->acode] = $obj->key;
+    }
+    return($arr);
+  } // END METHOD getKeyList }}}
+
+
+  /********************************************************************* 
+  * @METHOD: arr existVermindering5d( )
+  * @RETURNS: if exist: array: journaalid, boekregelid, bedrag, grootboekrekeningnummer, naam
+  *               else: false
+  * @SYLLABUS:  
+  *    Bepaal of er al een vermindering5d boeking voor dit jaar bestaat
+  *    Dit wordt gedaan door in de laatste periode een boeking af te vragen
+  *    met oorsprong 'vermindering5d' en niet op rkg_betaaldebtw
+  * 
+  /* *********************************************************************{{{ */ 
+  function existVermindering5d($periode) {
+    global $stam;
+    $stam->query =<<<EOT
+SELECT b."journaalid", b."boekregelid", b."grootboekrekening", b."grootboeknaam", b."bedrag" from "vw_boekregels" AS b
+WHERE b."periode"={$periode}
+  AND b."boorsprong" LIKE '5dregeling'
+  AND b."btwkey" NOT LIKE 'rkg_betaaldebtw';
+EOT;
+    $stam->Do_sql();
+    if($obj = $stam->Do_object()) {
+      $obj->bedrag = Rekening::numberFormat($obj->bedrag * -1);
+      return(array('journaalid'=>$obj->journaalid,'boekregelid'=>$obj->boekregelid,'grootboekrekening'=>$obj->grootboekrekening,
+                   'naam'=>$obj->grootboeknaam,'bedrag'=>$obj->bedrag));
+    }
+    else
+      return(false);
+  } // END METHOD existVermindering5d }}}
+
+
+  /********************************************************************* 
+  * @METHOD: arr maakQueryArr( ) 
+  * @RETURNS: array: met lege querys en cods
+  * @SYLLABUS:  
+  *    Stelt de arrayleden voor de querys samen.
+  *    Maakt tevens een cods array met elementen welke in het btw formulier getoond gaan worden.
+  * 
+  /* *********************************************************************{{{ */ 
+  function maakQueryArr() {
+    global $stam, $msg;
+
+    $arr = array();
+
+    // We moeten eerst de gegevens uit 'btwkeys' hier hebben.
+    // We halen alle btwkeys op en niet alleen die actief staan. Na ophalen
+    // bepalen we of er gegevens in de administratie zijn volgens een key. Zo
+    // niet dan vullen we geen cods. 
+    // Gegevens zijn:
+    // - is er een grootboekrekeningnummer gekoppeld aan een 'rkg_' key
+    //   of
+    // - komt een 'verkopen_' key voor in de grootboekstam van dat jaar
+    //
+    // !Firebird wil geen ,0 direct na een * zien! duidelijke een fout in de sqlparser
+    // Oplossing is om * te voorzien van een alias
+    $stam->Do_query("SELECT k.*,0 AS \"saldo\",0 AS \"omzet\",0 AS \"btw\",0 AS \"grootboekrekening\" "
+                   ."FROM {$stam->btwkeystbl} As k WHERE \"acode\" NOT LIKE '' ORDER BY \"acode\" ");
+                   //."FROM {$stam->btwkeys} WHERE WHERE \"acode\" NOT LIKE '' AND \"actief\"=1 ORDER BY \"ccode\" ");
+    while($obj = $stam->Do_object()) {
+      $cods[$obj->acode] = array('label'=>$obj->label,'key'=>$obj->key,'type'=>$obj->type);
+    }
+printrc2($cods, "cods 1: ");
+/*
+    printrc2($cods, "cods 2: ");
+    printrd($msg, "msg: ");
+
+cods: 
+Array
+(
+    [1a] => Array
+        (
+            [label] => Leveringen/diensten belast met hoog tarief
+            [key] => rkg_btwverkoophoog
+            [type] => btwv
+        )
+)
+*/
+    return($cods);
+
+  } // END METHOD maakQueryArr }}}
+
+
+
+  /********************************************************************* 
+  * @METHOD: arr loadQueryArr( ) 
+  * @RETURNS: array: gevuld met bedragen uit vw_btw
+  * @SYLLABUS:  
+  *    Vult de arrayleden uit maakQueryArr met values uit vw_btw
+  * 
+  /* *********************************************************************{{{ */ 
+  function loadQueryArr(&$rkgobj, $periode) {
+    global $stam;
+
+    $arr = array();
+
+    /* 2013-08-16
+       Als de periode de laatste reguliere is van het boekjaar (4 of 12) neem dan de correctieperiode ook mee
+    */
+    $stam->query =<<<EOT
+SELECT 
+  "boekjaar"
+  ,"ccode"
+  ,"label"
+  ,SUM("omzet") As "omzet"
+  ,SUM("btwbedrag") As "btwbedrag"
+FROM 
+  "vw_btw" 
+WHERE 
+  {$this->periodeWhere($periode)}
+GROUP BY
+  "boekjaar", "ccode", "label"
+ORDER BY
+  "ccode"
+EOT;
+    $stam->Do_sql(basename(__FILE__)."::".__FUNCTION__."::".__LINE__);
+  /*
+  *   boekjaar periode ccode label                                              omzet  btwbedrag 
+  *   2011     1       1a    1a. Leveringen/diensten belast met hoog tarief     10774  2047     
+  *   2011     1       1b    1b. Leveringen/diensten belast met laag tarief     117    7       
+  *   2011     1       1e    1e. Leveringen/diensten belast met 0% of niet bij  1515   NULL   
+  *   2011     1       5a    5a. Verschuldigde omzetbelasting: rubrieken 1 tm 4 NULL   2054  
+  *   2011     1       5b    5b. Voorbelasting                                  NULL   2401 
+  *   2011     1       5e    5e. Totaal                                         NULL   -347
+  *
+  * voor de consolidatie-journaalboekingen maken we een aparte view waarin de
+  * polariteit van de bedragen wel goed staan. Die aparte view moet zowiezo omdat
+  * 5b maar in theorie ook 1a en 1b uit meerder rekeningnummers kunnen bestaan,
+  * die allemaal apart moeten worden geegaliseerd. De 5b hierboven is een SUM van
+  * (evt.meer) rekeningen.  In de journaalpostview wordt ook zorg gedragen voor
+  * de werkelijke bedragen en delta's dus die hoeven we hier ook niet meer mee te
+  * nemen en te onthouden.
+  *
+  */
+    // houd erzijnsaldi bij. Bij false wordt de consolidatiebutton geblokkeerd.
+    //
+    $erzijnsaldi = false;
+    //
+    // Het kan zijn dat de rkgobj array hier opnieuw wordt gevuld, b.v. na berekenen
+    // van 5d. Schoon daarom de bestaande values voor het geval er geen nieuwe value
+    // is gevonden. 
+    foreach($rkgobj As $key=>$val) {
+      $rkgobj[$key]->btwbedrag = 0.0;
+      $rkgobj[$key]->omzet = 0.0;
+      $rkgobj[$key]->AG_btwbedrag = 0.0;
+      $rkgobj[$key]->AG_omzet = 0.0;
+    }
+    while($obj  = $stam->Do_object()) {
+      $rkgobj[$obj->ccode]->btwbedrag = $obj->btwbedrag;
+      $rkgobj[$obj->ccode]->omzet     = $obj->omzet;
+      $erzijnsaldi = true;
+    }
+    $stam->Do_free();
+
+    // Totalen en subtotalen invullen
+    // In versie 1.7.0 zijn 5a en 5e al door de view berekend; in 1.9.3 5c ook.
+    // 5e kunnen we daar evt uithalen omdat die ook hier te berekenen valt
+    // en dat moet mssch straks ook als 5d nog een rol gaat spelen.
+    //
+    //$rkgobj['5c']->btwbedrag = $rkgobj['5a']->btwbedrag - $rkgobj['5b']->btwbedrag;
+    //$rkgobj['5e']->btwbedrag = $rkgobj['5c']->btwbedrag - $rkgobj['5d']->btwbedrag;
+
+    printrc2($rkgobj, "rkgobj4 kaal: " );
+    return($erzijnsaldi);
+
+  } // END METHOD loadQueryArr }}}
+
+
+} // END CLASS BTW
+
+
+/* __END__ */

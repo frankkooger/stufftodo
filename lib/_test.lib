@@ -1,0 +1,33 @@
+<?php // vim: syntax=php so=100
+
+Class Test extends File {
+  var $msg='';
+
+  public function __construct() {
+  }
+
+  function testWritable($input) {
+    if(! is_writable($input)) {
+      $this->msg = "Kan geen bestanden wegschrijven in: '{$input}'!";
+    }
+    else
+      return(true);
+  } // END FUNCTION testWritable
+
+  function touchWritable($file) {
+    if(! touch($file)) {
+      $this->msg = "Kan bestand: '{$file}' niet schrijven!";
+      return(false);
+    }
+    else if(! chmod($file,0664)) {
+        $this->msg = "Kan bestand: '{$file}' geen groepsrechten geven!";
+        return(false);
+    }
+    else {
+      return(true);
+    }
+  } // END FUNCTION touchWritable
+
+} // END CLASS Test
+
+?>

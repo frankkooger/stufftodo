@@ -1,0 +1,151 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _rendering.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+Class Rendering       {    // rendert het resulaat naar scherm
+  var $titel = "";
+  var $keywords = ""; 
+  var $description = "";
+  var $body = "";
+  var $extra_headers = "";
+  var $extra_styles = "";
+  var $onload = ""; // indien gevuld, kan in de bodytag worden meegegeven
+  var $jscript = "";
+  var $pscript = ""; // persistant jscript, gebruikt voor noodzakelijk jscript
+  var $iscript = array(); // included javascript files
+  var $schriftstijl = false;
+  var $linkerrij = false;
+  var $subtitle = array();
+
+  // CONSTRUCTOR
+  public function __construct($rid=0, $naam="") {
+    $this->init($rid, $naam);
+  }
+
+  // METHOD init
+  function init($rid, $naam) {
+    ! empty($rid) ? $this->rid=$rid : $this->rid="";
+    ! empty($naam) ? $this->naam=$naam : $this->naam="";
+  } // END METHOD init
+
+
+  // METHOD br
+  function br() {
+    $this->body .= "\n<div><br /></div>\n";
+  } // END METHOD br
+  
+
+  // METHOD nl
+  function nl() {
+    $this->body .= "\n";
+  } // END METHOD nl
+  
+
+  // METHOD session
+  function session() {
+    print('<pre>session: ');
+    print_r($_SESSION);
+    print('</pre>');
+  } // END METHOD session
+  
+
+  // METHOD cookie
+  function cookie() {
+    print('<pre>cookie: ');
+    print_r($_COOKIE);
+    print('</pre>');
+  } // END METHOD cookie
+  
+
+  // METHOD post
+  function post() {
+    print('<pre>post: ');
+    print_r($_POST);
+    print('</pre>');
+  } // END METHOD post
+  
+
+  // METHOD globals
+  function globals() {
+    print('<pre>globals: ');
+    print_r($GLOBALS);
+    print('</pre>');
+  } // END METHOD globals
+  
+
+  // METHOD printr
+  function printr($arg) {
+    print('<pre>printr: ');
+    print_r($arg);
+    print('</pre>');
+  } // END METHOD printr
+  
+
+  // METHOD output
+  /**
+  * Als een filenaam wordt meegegeven dan
+  * de filenaam als basis gebruiken voor het template
+  * Anders checken of een standaard template is ingesteld
+  *  'ML_SYSTEM['template']
+  * Anders hardcoded template gebruiken
+  */
+  function output($file="",$mode="") {
+
+    if(! empty($file)) {
+      $template = preg_replace('/\/{0,1}(.+)\..*$/', '$1', $file);
+    }
+    else if(! empty($GLOBALS['config']->data['style']['template']) ) {
+      $template = $GLOBALS['config']->data['style']['template'];
+    }
+    else {
+      $template = "_rendering";
+    }
+
+    if(! empty($mode)) {
+
+      switch($mode) {
+        case "xhtmlstrict"  : 
+          include($template."_xhtmlstrict.inc");
+          break;
+        case "xhtmltransitional"  : 
+          include($template."_xhtmltransitional.inc");
+          break;
+        case "html"  : 
+          include($template."_html.inc");
+          break;
+        default :
+          include($template."_html.inc");
+          break;
+      }
+      
+    } // END if mode
+    else {
+      include($template.".inc");
+    }
+
+  } // END METHOD output
+
+
+} // END CLASS Rendering
+
+
+/* __END__ */

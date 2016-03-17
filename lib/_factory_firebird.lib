@@ -1,0 +1,45 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _factory_firebird.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+require("_dbasefirebird.lib");        // FireBird driver
+
+Class DbFactory extends FBConnector {
+
+  public function __construct($dbh="", $dbu="", $dbp="", $dbase="", $drv='firebird', $debug="neutral", $connectid=0) {
+    global $config;
+    // Indien driver firebird dan volledig pad aan dbase koppelen en '.fdb' als extentie koppelen
+    // Dit opslaan in db-fullpath
+    $config->setValue('db', 'fullpath', $config->data['dir']['dbase'].PS.$config->data['db']['default'].'.fdb');
+
+    return($this->initDb($dbh, $dbu, $dbp, $dbase, $drv, $debug, $connectid)) ;
+  }
+
+  public function initDb($dbh="", $dbu="", $dbp="", $dbase="", $drv='firebird', $debug="neutral", $connectid=0) {
+    global $config;
+    $dbase == '' && $dbase = $config->data['db']['fullpath'];
+    return(parent::__construct($dbh, $dbu, $dbp, $dbase, $drv, $debug, $connectid));
+  } // END METHOD initDb
+
+} // END CLASS DbFactory extends FBConnector;
+
+/* __END__ */

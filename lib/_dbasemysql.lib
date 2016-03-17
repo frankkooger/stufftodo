@@ -1,0 +1,847 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _dbasemysql.lib 215 2011-09-25 18:54:41Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+/* ****************************************************************
+* @LIB:      _dbase.lib
+* @CLASS:    DbConnector()
+* @SYLLABUS: 
+*
+*****************************************************************{{{ */
+
+// CLASS DbConnector
+// INITIATE WITH:
+//   $dba = new DbConnector([str dbhost],[str dbuser],[str dbpasswd],[str dbase],[str debugmode],[int connectid]);
+//
+// SIMPLE SQLSTATEMENT:
+//   $dba->query = <sql statement>;
+//   $dba->Do_query([str user_errormessage]);
+//   $array = $dba->Do_array();
+// OR
+//   $object = $dba->Do_object();
+//
+// SHORTCUTS TO FETCH 1 RECORD FROM A DATABASE:
+//   $array  = $dba->Get_array(str sqlstatement [, str user_errormessage]);
+//   $object = $dba->Get_object(str sqlstatement [, str user_errormessage]);
+//
+// SHORTCUT TO FETCH 1 FIELDVALUE FROM A DATABASERECORD:
+//   $str = $dba->Get_field(str veld, str [dbase].table, str "WHERE STATEMENT");
+// F.E.:
+//   $str = $dba->Get_field("naam", "database.adressen", "userid=15");
+//
+// SHORTCUT TO FETCH MORE FIELDVALUES FROM A DATABASERECORD:
+//   $str = $dba->Get_fields(arr velden, str [dbase].table, str "WHERE STATEMENT");
+// F.E.:
+//   $str = $dba->Get_fields(array("id","naam"), "database.adressen", "userid=15");
+//
+//
+// LAST INSERTED RECORDID:
+//   $dba->Lastid(); // IMMEDIATALY AFTER Do_query
+//
+
+/**
+3 sep 04, extra parameter 'debug' om de debug functie tijdens instantieren 
+te kunnen aan of uitzetten. Mogelijke values: "debugon", "debugoff" of random
+
+*/
+
+Class DbConnector {
+  var $connect, $dbase, $query, $lquery, $respointer, $debug, $fout;
+
+  /* ****************************************************************
+  * @METHOD: void  CONSTRUCTOR ( [ $dbh="" [, $dbu="" [, $dbp="" [, $dbase="" [, $debug="neutral" [, $connectid=0 ]]]]]] )
+  * @PARAMETERS:
+  *   $dbh: databasehost, mostly 'localhost' if script execution and database are at the same server
+  *   $dbu: database user
+  *   $dbp: password of database user
+  *   $dbase: default database
+  *   $debug: debug on ('debugon') or off (anyting else). In the latter case debug can be switched on through external $GLOBALS['debug']
+  *   $connectid: zie syllabus
+  * @RETURNS: void
+  * @SYLLABUS: 
+  *   IF NOT CALLED WITH ANY PARAMETER, DEFAULT PARAMETERS
+  *   FOR dbhost, dbuser and dbpasswd ARE PRESUMED.
+  *   THESE PARAMETERS MUST BE EXTERNAL DEFINED IN F.A. IN _init.inc
+  *
+  *   22 sep 2005: $connectid toegevoegd. Het is hiermee mogelijk een nieuw dbase object
+  *   aan te maken met een bestaande connectid. Dit is b.v. handig als een vraag aan een andere
+  *   dan de default database moet worden gesteld. Openen van een connectid op die andere dbase zorgt
+  *   ervoor dat die dbase default wordt wat we niet altijd willen.
+  *
+  *****************************************************************{{{{ */
+  public function __construct($dbh="", $dbu="", $dbp="", $dbase="", $debug="neutral", $connectid=0) {
+
+    // debug status uitzetten als geinitieerd
+    if($debug == "debugoff") $this->debug = false;
+    else if($debug == "debugon") $this->debug = true;
+    else if(! empty($GLOBALS['config']->data['debug']['dbase'])) $this->debug = true;
+    else $this->debug = false;
+
+    if($this->debug) print("  \n<!-- Realmparameters (host,user,pwd): "
+                          ."$dbh, $dbu, $dbp -->\n");
+
+    if(! $connectid) { // maak connectie
+
+      $dbh = $this->setParms($dbh, "dbhost");
+      $dbu = $this->setParms($dbu, "dbuser");
+      $dbp = $this->setParms($dbp, "dbpasswd");
+      $this->dbase = $this->setParms($dbase, "dbase");
+
+    if($this->debug) print("  \n<!-- Realmparameters afterinit (host,user,pwd): "
+                          ."$dbh, $dbu, $dbp -->\n");
+
+      if (! $this->connect = mysql_connect("$dbh","$dbu","$dbp")) {
+        $this->Printerrore ("Fout init-connect3: ". mysql_error() ."\n") ;
+        $this->fout = 'geen connectie';
+        return(false);
+      }
+
+      // is er een default dbase? Selecteer die dan voor deze connectie
+      if($this->dbase)
+        if(! $this->Select()) {
+          $this->fout = 'geen database';
+          return(false);
+        }
+
+    }
+    else 
+      $this->connect = $connectid;
+
+    return($this->connect);
+
+  } // END CONSTRUCTOR}}}}
+
+
+  /* ****************************************************************
+  * @METHOD: str  setParms ( string $methodparm , string $type )
+  * @PARAMETERS:
+  *   $methodparm: als methodparm niet leeg is, wordt deze weer direct als
+      resultaat teruggegeven; het betekent dat deze waarde met constructor is
+      ingegeven en dat zoeken naar andere methoden niet meer nodig is.
+  *   $type: welke parameter wordt afgevraagd: dbhost, dbuser, dbpasswd, dbase
+  * @RETURNS: string in case of succes, false otherwise
+  * @SYLLABUS: 
+  *   BEPAAL DE INPUT PARAMETERS. MAAK EEN KEUZE UIT (IN VOLGORDE): 
+  *   1. invoer met de methode-aanroep 
+  *   2. beschikbaar zijn van config->data parms 
+  *   3. beschikbaar zijn van globale parms
+  *****************************************************************{{{{ */
+  function setParms($methodparm, $type) {
+    global $config;
+
+    switch($type) {
+      
+      case "dbhost"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['dbhost'])) return($config->data['dbhost']);
+        else if(! empty($config->data['dbase']['host'])) return($config->data['dbase']['host']);
+        else if(! empty($config->data['db']['host'])) return($config->data['db']['host']);
+        else if(defined("DBHOST")) return(DBHOST);
+        else if(! empty($GLOBALS['dbhost'])) return($GLOBALS['dbhost']);
+        else return(false);
+        break;
+      case "dbuser"   :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['dbuser'])) return($config->data['dbuser']);
+        else if(! empty($config->data['dbase']['user'])) return($config->data['dbase']['user']);
+        else if(! empty($config->data['db']['user'])) return($config->data['db']['user']);
+        else if(defined("DBUSER")) return(DBUSER);
+        else if(! empty($GLOBALS['dbuser'])) return($GLOBALS['dbuser']);
+        else return(false);
+        break;
+      case "dbpasswd" :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['dbpasswd'])) return($config->data['dbpasswd']);
+        else if(! empty($config->data['dbase']['passwd'])) return($config->data['dbase']['passwd']);
+        else if(! empty($config->data['db']['passwd'])) return($config->data['db']['passwd']);
+        else if(defined("DBPASSWD")) return(DBPASSWD);
+        else if(! empty($GLOBALS['dbpasswd'])) return($GLOBALS['dbpasswd']);
+        else return(false);
+        break;
+      case "dbase" :
+             if(! empty($methodparm)) return($methodparm);
+        else if(! empty($config->data['defaultdbase'])) return($config->data['defaultdbase']);
+        else if(! empty($config->data['dbase']['default'])) return($config->data['dbase']['default']);
+        else if(! empty($config->data['db']['default'])) return($config->data['db']['default']);
+        else if(defined("DEFAULTDBASE")) return(DEFAULTDBASE);
+        else if(! empty($GLOBALS['dbase'])) return($GLOBALS['dbase']);
+        else return(false);
+        break;
+      default         :
+        break;
+
+    } // end switch
+
+  } // END FUNCTION setParms}}}}
+    
+
+  /*********************************************************************
+  * @METHOD: bool Select( [ str $error='' ] )
+  * @PARAMETERS: str $error
+  * @RETURNS: true or false
+  * @SYLLABUS:
+  *   SELECTEER EEN DATABASE ALS DEFAULT
+  *   NORMALLY NOT USED. USE SQL INSTEAD:
+  *     select * FROM <database>.<table> WHERE etc...
+  *
+  /* *********************************************************************{{{ */
+  function Select($dbase='', $oorsprong='') {
+    if (! mysql_select_db($this->dbase, $this->connect)) {
+      $str = "Fout init-sock mysql: ". mysql_error() ."<BR>\n 
+              dbase: {$this->dbase}<BR>\n";
+      $this->Printerror($str);
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Select: {$dbase} - ({$oorsprong})");
+      else           $this->debugprint("Select: {$dbase}");
+    }
+
+      return(false);
+    } 
+    else {
+      if($this->debug) $this->debugprint("Database default selected: $this->dbase");
+      return(true);
+    }
+  } // END METHOD Select }}}
+
+  
+  /*********************************************************************
+  * @METHOD: str Lastid( )
+  * @PARAMETERS:  
+  * @RETURNS: Last inserted autonum or false
+  * @SYLLABUS:
+  *
+  /* *********************************************************************{{{ */
+  function Lastid() {
+    return(mysql_insert_id($this->connect));
+  } // END METHOD Lastid }}}
+
+
+  /*********************************************************************
+  * @METHOD: str newId( )
+  * @PARAMETERS:  
+  * @RETURNS: Last inserted autonum or false
+  * @SYLLABUS: Geeft een met 1 verhoogd id terug van een tabel. Default is het
+  * veld "id" maar kan aangepast worden.
+  *
+  /* *********************************************************************{{{ */
+  function newId($tabel, $veld='id', $oorsprong='') {
+    if(preg_match("/boekregels/", $tabel)) $veld='boekregelid';
+    else if(preg_match("/journaal/", $tabel)) $veld='journaalid';
+    else $veld='id';
+    if($id = $this->Get_field("MAX(\"{$veld}\")", $tabel,'',$oorsprong)) {
+      return(++$id);
+    }
+    else {
+      // als een tabel nog leeg is geeft deze Null terug. vertaal dat naar 1
+      return(1);
+    }
+  } // END METHOD newId }}}
+
+
+  /*********************************************************************
+  * @METHOD: pointer Do_sql( [ str $oorsrprong='' ] )
+  * @PARAMETERS: 
+  *   str $oorsprong: een vrij in te geven string die getoond wordt indien $this->debug==true.
+  *   Vaak is dit een string in de vorm: __FILE__."::".__FUNCTION__."::".__LINE__
+  * @RETURNS: pointer naar resultaat of false
+  * @SYLLABUS:
+  *   Stuur een sql execute statement naar mysql
+  *   De query moet al eerder geladen zijn in de instance parameter: $object->query
+  *
+  /* *********************************************************************{{{ */
+  function Do_sql($oorsprong='')  {
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Do_sql ({$oorsprong}): {$this->query}");
+      else           $this->debugprint("Do_sql: {$this->query}");
+    }
+
+    return($this->Do_query($this->query));
+
+  } // END METHOD Do_sql }}}
+
+
+  /*********************************************************************
+  * @METHOD: pointer Do_query( str query, [ str $oorsrprong='' ] )
+  * @PARAMETERS: 
+  *   str $oorsprong: een vrij in te geven string die getoond wordt indien $this->debug==true.
+  *   Vaak is dit een string in de vorm: __FILE__."::".__FUNCTION__."::".__LINE__
+  * @RETURNS: pointer naar resultaat of false
+  * @SYLLABUS:
+  *   STUUR EEN SQL STATEMENT EN EXECUTE GELIJK.
+  *   Deze methode laat een evt. eerder geladen db->query intact
+  *   NOTE: dit laatste is niet meer waar. Omdat PDO een Data-seek functie mist
+  *   moeten we om een data-seek de query herhalen. De query van Do_sql() en
+  *   Do_query moet dus bewaard zijn voor de data-seek. Dit betekent tevens dat
+  *   een data-seek alleen kan worden gedaan bij een Do_sql() en een
+  *   Do_query().
+  *
+  /* *********************************************************************{{{ */
+  public static function select_handler($exception) {
+    // Output the exception details
+    printrc1('Select exception: '. $exception->getMessage());
+  }
+
+  function Do_query($str, $oorsprong='') {
+
+    $str = $this->settleSign($str);
+    $str = $this->settleLimit($str);
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Do_query ({$oorsprong}): {$str}");
+      else           $this->debugprint("Do_query: {$str}");
+    }
+
+    // Temporarily change the PHP exception handler while we . . .
+    //set_exception_handler(array(__CLASS__, 'select_handler'));
+
+    if (! $this->respointer=mysql_query($str,$this->connect)) {
+      $this->Printerror("<P>$str<P>Fout Query-31: ". mysql_error() ."\n"
+                         ."Oorsprong: $oorsprong");
+      return(false);
+    }
+
+    // Change the exception handler back to whatever it was before
+    //restore_exception_handler();
+
+    return($this->respointer);
+
+  } // END METHOD Do_query }}}
+
+  
+  // RETURNS ASSOCIATIVE ARRAY FROM RESULT POINTER OR RETURNS FALSE
+
+  function Do_assoc($dummy="")  {
+    if (! $arr=mysql_fetch_assoc($this->respointer)) {
+      return(false);
+    }
+    return($arr);
+  }
+
+
+  // RETURNS ARRAY FROM RESULT POINTER OR RETURNS FALSE
+
+  function Do_array($dummy="")  {
+    if (! $arr=mysql_fetch_array($this->respointer)) {
+      return(false);
+    }
+    return($arr);
+  }
+
+
+  // RETURNS OBJECT FROM RESULT POINTER OR RETURNS FALSE
+
+  function Do_object($mode = "")  {
+    if (! $obj=mysql_fetch_object($this->respointer)) {
+      return(false);
+    }
+    return($obj);
+  }
+
+  // RETURNS FIELDVALUE OF $field FROM RECORD $row
+  // IN RESULT POINTER OR RETURNS FALSE
+
+  function Do_result($field=0,$row=0)  {
+    if (! $arr=mysql_result($this->respointer,$row,$field)) {
+      return(false);
+    }
+    return($arr);
+  }
+
+
+  function settleSign($expr) {
+    return(preg_replace("/[`]/", "\"", $expr));
+  } // END METHOD settleSign
+
+
+  function settleLimit($expr) {
+    return($expr);
+    //return(preg_replace("/LIMIT/", "ROWS", $expr));
+  } // END METHOD settleLimit
+
+
+  function settleWhere($expr) {
+
+    if(preg_match("/^[ ]*(ORDER|GROUP)/", $expr)) $where=$expr;
+    elseif(preg_match("/^[ ]*(AND)/", $expr))   $where = preg_replace("/AND/", "WHERE", $expr);
+    elseif(preg_match("/^[ ]*(WHERE)/", $expr)) $where=$expr;
+    else $where = "WHERE ".$expr;
+
+    return($this->settleSign($where));
+
+  } // END METHOD settleWhere
+
+
+  /*********************************************************************
+  * @METHOD: str Get_field( string $veld, str $tabel, str $expr[, str $oorsprong] )
+  * @PARAMETERS:  
+  *    str $veld: het veld waarvan de waarde willen weten
+  *    str $tabel: de table waarin het veld zich bevindt
+  *    str $expr: de WHERE expression zonder 'WHERE'. Als er geen selectiecriteria zijn is dit tenminste '1'
+  *    str $oorsprong: een arbitraire code waarmee we in de scripts de
+  *    oorsprong van de query kunnen aangeven. Dit is vooral van belang bij
+  *    debug waar we kunnen zien waar b.v. een fout in een query zijn oorsprong
+  *    heeft.
+  * @RETURNS:  string
+  * @SYLLABUS:
+  *    RETURNS VALUE OF FIELD $veld FROM table,field,value
+  *    syntax: $db->Get_field("veld", "table", "select", $oorsprong="hiergebeurdehet");
+  *
+  /* *********************************************************************{{{ */
+  function Get_field($veld,$tabel,$expr='1',$oorsprong='')  {
+    $where = $this->settleWhere($expr);
+    if(! preg_match("/\".*\"/", $veld) && $veld != 'COUNT(*)') $veld = "\"{$veld}\"";
+
+    $this->lquery = ($expr) ? "SELECT $veld FROM $tabel $where LIMIT 1" : 
+                              "SELECT $veld FROM $tabel LIMIT 1";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_field ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_field: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-1 : ". mysql_error() ."\n
+             Oorsprong: {$oorsprong} \n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+    }
+
+    if(@mysql_num_rows($rev) > 0)  {
+      $val = mysql_result($rev,0,0);
+      mysql_free_result($rev);
+    }
+    else {
+      $val = false;
+    }
+    return($val);
+  } // END METHOD Get_field }}}
+
+
+  // RETURNS ARRAY OF VALUES OF FIELD $veld OF 1 OR MORE RECORDS FROM table,field,value
+  //
+  /* *********************************************************************{{{ */
+  function Get_array_field($veld,$tabel,$expr='1',$oorsprong='')  {
+
+    $where = $this->settleWhere($expr);
+    // Als een veld wordt aangeleverd zonder omsluitende apostrophes, voeg ze toe
+    if(! preg_match("/\".*\"/", $veld) && $veld != 'COUNT(*)') $veld = "\"{$veld}\"";
+
+    $this->lquery = ($expr) ? "SELECT $veld FROM $tabel $where" : 
+                              "SELECT $veld FROM $tabel";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_array_field ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_array_field: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-10 : ". mysql_error() ."\n
+             Oorsprong: {$oorsprong} \n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+
+    $ar = array();
+    while($row = mysql_fetch_row($rev)) $ar[] = $row[0];
+    $this->Do_free($rev);
+    // return dus altijd een array, desnoods een lege
+    return($ar);
+  }
+
+
+  // RETURNS VALUE OF MORE FIELDS arr[$veld] FROM table,fields,value
+  //
+  /* *********************************************************************{{{ */
+  function Get_fields($velden,$tabel,$expr='1',$assoc=1,$oorsprong='')  {
+    $fields = "";
+    if(is_array($velden)) {
+      foreach($velden AS $val)
+        if(! preg_match("/\".*\"/", $val) ) $fields .= ",\"{$val}\"";
+        else $fields .= ",{$val}";
+      $fields = substr($fields,1);
+    }
+    else 
+      if(! preg_match("/\".*\"/", $velden) && $velden != 'COUNT(*)') $fields = "\"{$velden}\"";
+      else $fields = $velden;
+
+    $where = $this->settleWhere($expr);
+
+    $this->lquery = ($expr) ? "SELECT $fields FROM $tabel $where LIMIT 1" : 
+                              "SELECT $fields FROM $tabel LIMIT 1";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_fields ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_fields: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-11 : ". mysql_error() ."\n
+             Oorsprong: {$oorsprong} \n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+
+    $ar = array();
+    if(@mysql_num_rows($rev) > 0)  {
+      if($assoc == 1) {
+        $ar = mysql_fetch_array($rev,MYSQL_ASSOC);
+      }
+      else {
+        // maak er geen assoc van omdat de array-items dan alleen maar
+        // op veldnaam zijn te selecteren
+        // Zonder assoc kan het resultaat b.v. in een list($a, $b) worden gelezen.
+        // met assoc zouden a en b exact de gevraagde veldnamen moeten zijn.
+        $ar = mysql_fetch_array($rev,MYSQL_NUM);
+      }
+    }
+    $this->Do_free($rev);
+    return(($ar) ? $ar : '');
+
+  } // END METHOD Get_fields }}}
+
+
+  // RETURNS ARRAY OF FIRST RECORD THAT IS RESULT FROM GIVEN QUERY
+  //
+  function Get_array($expr, $oorsprong='')  {
+
+    $expr = $this->settleSign($expr);
+
+    $this->lquery = $expr . " LIMIT 1 ";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_object query: ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_object query: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-2 : ". mysql_error() ."\n
+             Oorsprong: {$oorsprong} \n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+    else  {
+      if(mysql_num_rows($rev) > 0)  {
+        $arr = mysql_fetch_array($rev);
+        $this->Do_free($rev);
+        return(($arr) ? $arr : '');
+      }
+      else { return(false); }
+    }
+  }
+
+  // RETURNS ASSOCIATIVE ARRAY OF FIRST RECORD THAT IS RESULT FROM GIVEN QUERY
+  //
+  /* *********************************************************************{{{ */
+  function Get_assoc($expr, $oorsprong='')  {
+
+    $expr = $this->settleSign($expr);
+
+    $this->lquery = $expr . " LIMIT 1 ";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_object query: ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_object query: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-20 : ". mysql_error() ."\n
+             Oorsprong: {$oorsprong} \n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+    else  {
+      if(mysql_num_rows($rev) > 0)  {
+        $arr = mysql_fetch_assoc($rev);
+        $this->Do_free($rev);
+        return(($arr) ? $arr : '');
+      }
+      else { return(false); }
+    }
+  }
+
+  // RETURNS OBJECT OF FIRST RECORD THAT IS RESULT FROM GIVEN QUERY
+  //
+  /* *********************************************************************{{{ */
+  function Get_object($expr,$oorsprong='')  {
+
+    $expr = $this->settleSign($expr);
+
+    $this->lquery = $expr . " LIMIT 1 ";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Get_object query: ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Get_object query: {$this->lquery}");
+    }
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-21 : ". mysql_error() ."\n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+    else  {
+      if(mysql_num_rows($rev) > 0)  {
+        $obj = mysql_fetch_object($rev);
+        $this->Do_free($rev);
+        return(($obj) ? $obj : '');
+      }
+      else { return(false); }
+    }
+
+  } // END METHOD Get_object }}}
+
+
+  /*********************************************************************
+  * @METHOD: str Get_datediff( str $isodate[, str $isodate2='' ] )
+  * @PARAMETERS:  
+  *    str $isodate: Een datum in iso formaat: 'Y-m-d'
+  *    str $isodate2: Een datum in iso formaat: 'Y-m-d'
+  * @RETURNS:  string difference in days
+  * @SYLLABUS:
+  *    RETURNS difference in days between 2 isodates. Als er 1 datum wordt
+  *    meegegeven is het verschil tussen vandaag en die datum. Als er 2 data
+  *    worden meegegeven dan is het verschil tussen isodate -/- isodate2
+  *
+  /* *********************************************************************{{{ */
+  function Get_datediff($date,$date2='')  {
+
+    if($date2) {
+      $query = "SELECT DATEDIFF('".DateConnector::norm2iso($date)."','".DateConnector::norm2iso($date2)."')";
+    }
+    else {
+      $query = "SELECT DATEDIFF(NOW(), '".DateConnector::norm2iso($date)."')";
+    }
+
+    if($this->debug) $this->debugprint("Get_datediff query: {$query}");
+
+    if (! $rev=mysql_query($query,$this->connect)) {
+      $str = "<BR>Fout Query-22 : ". mysql_error() ."\n
+              <BR>RemotQuery : {$query}<P>\n";
+      $this->Printerror($str);
+      return(false);
+    }
+    else  {
+      if(mysql_num_rows($rev) > 0)  {
+        $val = mysql_result($rev,0,0);
+        mysql_free_result($rev);
+        return($val);
+      }
+      else { return(false); }
+    }
+  } // END METHOD Get_datediff }}}
+
+
+  // DELETE RECORD(S)
+  //
+  function Delete_record($tabel, $expr, $oorsprong='') {
+
+    // Een expr is hier verplicht anders zouden we de hele tabel kunnen wissen indien we expr vergeten
+    //
+    $this->lquery = "DELETE FROM $tabel WHERE $expr";
+
+    if($this->debug) $this->debugprint("Delete_record query: {$this->lquery}");
+
+    return($this->Do_query($this->lquery, "Van Delete_record - ".$oorsprong));
+  }
+
+
+  /*********************************************************************
+  * @METHOD: bool existTable( str $tablename )
+  * @PARAMETERS:  
+  * @RETURNS:  true on existance, else false
+  * @SYLLABUS:
+  *    Test of een bepaalde table in de database bestaat.
+  *
+  /* *********************************************************************{{{ */
+  function existTable($name, $oorsprong='') {
+      
+    $admin = 'Tables_in_'.$GLOBALS['config']->data['db']['default'];
+    $this->lquery = "SHOW TABLES WHERE {$admin} LIKE '{$name}'";
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("Exist_record ({$oorsprong}): {$this->lquery}");
+      else           $this->debugprint("Exist_record: {$this->lquery}");
+    }
+
+    if (! $rev = $this->Do_query($this->lquery)) {
+      $str = "<BR>Fout Query-13 : ". ibase_errmsg() ."\n
+              Oorsprong: {$oorsprong}
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+    }
+
+    if(@mysql_num_rows($rev) > 0)  {
+      return(true);
+    }
+    else {
+      return(false);
+    }
+
+  } // END FUNCTION existTable }}}
+
+
+  // EXIST RECORD, RETURNS FALSE, 0 OR NUMBER OF RECORDS FOUND
+  //
+  function Exist_record($tabel, $expr) {
+
+    $this->lquery = "SELECT COUNT(*) FROM $tabel WHERE $expr";
+
+    if($this->debug) $this->debugprint("Exist_record: {$this->lquery}");
+
+    if (! $rev=mysql_query($this->lquery,$this->connect)) {
+      $str = "<BR>Fout Query-13 : ". mysql_error() ."\n
+              <BR>RemotQuery : {$this->lquery}<P>\n";
+      $this->Printerror($str);
+    }
+
+    if(@mysql_num_rows($rev) > 0)  {
+      $val = mysql_result($rev,0,0);
+      mysql_free_result($rev);
+    }
+    else {
+      $val = false;
+    }
+    // return waarde is 0 of false indien niets gevonden
+    //  en >0 indien iets gevonden
+    return($val);
+
+  }
+
+
+  // AUXILLERY FUNCTIES
+  //
+  function Data_seek($row = -1)  {
+    if($row != -1)
+      mysql_data_seek($this->respointer, $row);
+    else
+      return(false);
+  }
+
+  function Rewind() {
+    return($this->Herhaal());
+  }
+
+  function Herhaal()  {
+    if($this->Data_seek(0))
+      return(true);
+    else
+      return(false);
+  }
+
+  function Do_close()  {
+      mysql_close($this->connect);
+  }
+
+  function Do_free($pointer='')  {
+    if($pointer)
+      mysql_free_result($pointer);
+    else
+      mysql_free_result($this->respointer);
+  }
+
+  function N_rows($oorsprong='')  {
+
+    if($this->debug) {
+      if($oorsprong) $this->debugprint("N_rows query: ({$oorsprong}): {$this->query}");
+      else           $this->debugprint("N_rows query: {$this->query}");
+    }
+
+    if($x = @mysql_num_rows($this->respointer))
+      return($x);
+    else
+      return(false);
+  }
+
+  function N_affected_rows() {
+    // Denk erom dat bij affected_rows geen sprake is van een respointer; er is
+    // immers geen SELECT gedaan maar een INSERT of UPDATE of DELETE
+    if($x = @mysql_affected_rows($this->connect))
+      return($x);
+    else
+      return(false);
+  }
+  
+  function N_fields()  {
+      return(mysql_num_fields($this->respointer));
+  }
+
+  function Field_name($ind)  {
+      return(mysql_field_name($this->respointer, $ind));
+  }
+
+  function Field_type($ind)  {
+      return(mysql_field_type($this->respointer, $ind));
+  }
+
+  /* ****************************************************************
+  * @METHOD:   Prepare($str)
+  * @SYLLABUS: Maakt een string gereed om in een SQL query in te voegen.
+      Voor Mysql is dit b.v. addslashes().
+  *
+  *****************************************************************{{{ */
+  function Prepare($str) {
+    return(addslashes($str));
+  } // END FUNCTION Prepare }}}
+
+  function Printerror($str) {
+    echo "\n\n<!-- FUNCTIONAL ERROR: \n".$str." -->\n\n";
+  }
+
+  function Printerrore($str) {
+    echo "\n\n<!-- FATAL ERROR: \n".$str." -->\n\n";
+    exit;
+  }
+
+  function debugprint($str) {
+    echo "  \n<!-- $str -->\n";
+  }
+
+  // DUMMYS
+
+  function beginTransaction() {
+    return(true);
+  }
+
+  function commit() {
+    return(true);
+  }
+
+  function rollBack() {
+    return(true);
+  }
+
+  function exec($query) {
+    return(self::Do_query($query));
+  }
+
+} // END CLASS DbConnector
+
+/*******************************************************************************
+***  END _dbase.lib
+******************************************************************************}}} */
+

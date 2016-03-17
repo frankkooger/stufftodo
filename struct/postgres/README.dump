@@ -1,0 +1,7 @@
+Het dumpformaat van de nachtelijke backups is een copy format en geen insert format
+Dit formaat kan je niet met pg_restore terugzetten.
+
+Een copy format file zet je terug als volgt:
+
+cat <bestand.sql> | psql -U system -h localhost -d administratiekk
+

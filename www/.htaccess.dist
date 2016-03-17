@@ -1,0 +1,16 @@
+# Uncomment these for authentication at http level and create or use your own .htpasswd
+#
+#AuthUserFile /etc/pki/httpd/.htpasswd
+#AuthUserFile ../.htpasswd
+#AuthGroupFile /dev/null
+#AuthName EnterPassword
+#AuthType Basic
+#<Limit GET POST>
+#  require valid-user
+#</Limit>
+
+# Dont unset these settings! OpenAdmin.nl needs it.
+#
+php_flag magic_quotes_gpc off
+#
+# Remember: magic_quotes_gpc has been DEPRECATED as of PHP 5.3.0 and REMOVED as of PHP 6.0.0. Relying on this feature is highly discouraged.

@@ -1,0 +1,256 @@
+; vim: syntax=dosini fdm=marker fdc=0 so=100
+;;;
+; @version		$Id: _const.inc.dist 140 2010-09-05 21:23:57Z otto $
+; @package		OpenAdmin.nl
+; @author     Frank Kooger
+; @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+; @license		GNU/GPL, see LICENSE.php
+; OpenAdmin.nl is free software. This version may have been modified pursuant
+; to the GNU General Public License, and as distributed it includes or
+; is derivative of works licensed under the GNU General Public License or
+; other free or open source software licenses.
+; See COPYRIGHT.php for copyright notices and details.
+;;
+
+;;;
+;
+; %%abstract%%
+;
+; @abstract
+; @package		OpenAdmin.nl
+; @since		1.0
+;;
+
+;;
+;; LET OP: een ja/nee situatie beantwoorden met 1/0,  '1'/'0', '1'/'', true/false, yes/no
+;;
+
+[system]
+
+;; Bepaal of we op een windoze of linux platform draaien
+;;
+platform = PLATFORM
+
+;; webadres waaronder de administratie gaat draaien 
+;; ingeval van WAMP is dat meestal 'localhost'
+webadres   = 'localhost'
+
+;; draait de site onder https?
+https      = 0
+
+;; Wordt er tijdens het opstarten gecontroleerd of nieuwe updates beschikbaar zijn?
+autoupdates   = 0
+
+;; Worden de backupfiles ge-gzipt?
+gzip       = 1
+
+;; Draait de administratie als administrator?
+;; Als administrator zijn meer functies beschikbaar zoals aanmaken en laden van
+;; nieuwe administraties...
+;; editfuncties in het helpsysteem heeft nu zijn eigen administrator.
+administrator = 1
+
+;; Draait de applicatie op een netbook met een resolutie van 1024x600?
+;; Dit geeft de schermen een kleinere max hoogte dan normaal
+netbook = 0
+
+;; Hostnaam is onderdeel van de namen van backupfiles. Hiermee kan onderscheid
+;; worden gemaakt als de administratie op meerdere platforms wordt gedraaid. In
+;; alle andere gevallen: laat staan op 'localhost'
+uname = UNAME
+
+[help]
+
+;; De help-administrator kan wijzigingen aanbrengen in het locale helpsysteem
+;; indien dit is geinstalleerd.
+administrator = 1
+;; Indien er geen locale help-database is of een help-item in de locale
+;; help-database is nog niet gevonden, dan kan teruggegrepen worden naar de
+;; help-database op help.openadmin.nl.
+;; Hieronder schakel je dat aan (discardRemote=0) of uit (discardRemote=1) en
+;; bepaal je de hostnaam van online help.
+discardRemote = 0
+remoteHost = 'http://help.openadmin.nl/'
+;; help-maintenance is een systeemfunctie. Laat leeg!
+maintenance = ''
+
+[db]
+
+;; Mysql
+;;
+;; database host. Meestal is dit 'localhost'
+host           = "localhost"
+;; database connection port (if applicable)
+port           = "5432"
+;; Gebruiker en wachtwoord voor de database gebruiker
+user           = "dbuser"
+passwd         = "dbwachtwoord"
+;;
+;; Als je eventueel de rechten van de mysql database gebruiker wilt
+;; fine-tunen dan moet gebruiker _tenminste_ de volgende rechten hebben:
+;; - groep Data: Select, Insert, Update, Delete
+;; - groep Structuur: Create, Alter, Index, Drop
+;; - groep Administratie: Lock Tables
+;;
+;; Voor de rechten in Firebird gebruiken we in de single-user versie de
+;; standaard admin gebruiker SYSDBA met password 'masterkey'
+
+;; Met welk bedrijfsschema werkt de administratie?
+;; Het schema bepaalt de grootboekrekeningen en dagboeken die in een nieuwe
+;; administratie aangemaakt worden. 
+;; Schemas zijn opgeslagen in directory: $GLOBALS['ML_SYSTEM['dir']['struct']
+schema       = "algemeen-uitgebreid"
+
+;; Kies welk database systeem wordt gebruikt
+;driver    = "firebird"
+;driver    = "mysql"
+;driver    = "postgres"
+driver    = "sqlite"
+
+log       = "administratielog"
+default     = "administratie"
+
+[sessions]
+
+;; Als sessioncookies een aparte naam krijgen of in een speciale directory
+;; worden ondergebracht, vul dan hieronder in. Laat anders leeg.
+name    = '_ADMIN_SID'
+dir     = ''
+
+[debug]
+
+level       = 0
+dbase       = 0
+
+;; Print de GLOBALS aan het eind van elk formulier
+globals    = 0
+
+;; print de blauwe messages indien messages
+messages   = 1
+
+[path]
+
+;; Voorinstelling van het pad waar de mysql binaries zijn te vinden. Op windows
+;; is dat in een specifieke directory (verander die hieronder naar gelang de
+;; installatie verandert) en op linux is het in de PATH settings te vinden
+;; (/usr/bin) dus blijft de voorinstelling leeg.
+mysqlbin = MYSQLBIN
+
+;; Voorinstelling van het pad waar de sqlite binaries zijn te vinden. Op windows
+;; is dat in een specifieke directory (verander die hieronder naar gelang de
+;; installatie verandert) en op linux is het in de PATH settings te vinden
+;; (/usr/bin) dus blijft de voorinstelling leeg.
+sqlitebin = SQLITEBIN
+
+;; Voorinstelling van het pad waar de firebird binaries zijn te vinden. Op windows
+;; is dat in een specifieke directory (verander die hieronder naar gelang de
+;; installatie verandert) en op linux is het in de PATH settings te vinden
+;; (/usr/bin) dus blijft de voorinstelling leeg.
+firebirdbin = FIREBIRDBIN
+;;  "c:\\openadmin\\firebird\\bin" : '';
+
+;; Voorinstelling van het pad waar de postgresql binaries zijn te vinden. Op windows
+;; is dat in een specifieke directory (verander die hieronder naar gelang de
+;; installatie verandert) en op linux is het in de PATH settings te vinden
+;; (/usr/bin) dus blijft de voorinstelling leeg.
+postgresbin = POSTGRESBIN
+;;  "c:\\openadmin\\postgresql\\bin" : '';
+
+;; TODO bepaal op een linux systeem en een firebird installatie of gebruik
+;; wordt gemaakt van fbisql (Ubuntu) of isql (RedHat;CentOs)
+
+[style]
+
+;; Kleur van de achtergrond van de startpagina. Hiermee kan b.v. onderscheid
+;; worden gemaakt tussen een ontwikkel en productie-installatie
+;; Keuzen zijn: blauw/groen/geel/purple . Default is geel
+bg         = ''
+;; standaard gele background
+
+stylesheet = "/css/stylesheet.css"
+;; indien meerdere stylesheets nodig zijn: definieer een array:
+;;    stylesheet[] = "/css/stylesheet.css"
+;;    stylesheet[] = "/css/button.css"
+
+;; rendering template
+template   = "_rendering_html"
+
+[color]
+
+light    = "#E6E6FF"
+lightgray= "#e4e0db"
+darkgray = "#cbc7c3"
+admin    = "#edbbbb"
+
+[bgcolor]
+
+journaal      = "#e5e6ff"
+grootboek     = "#eed8ae"
+debiteuren    = "#cbffcb"
+crediteuren   = "#cbffcb"
+pinbetalingen = "#cbffcb"
+saldilijsten  = "#fff8dc"
+
+[dir]
+
+base     = DIRBASE
+
+dbase    = DATADIR
+backup   = DATADIR
+struct   = STRUCTDIR
+bin      = BINDIR
+
+[log]
+
+file     = LOGFILE
+size     = 5000.000
+level    = 3
+
+[tbl]
+
+boekregels       = "boekregels"
+boekregels_trash = "boekregelsTrash"
+btwaangiftes     = "btwaangiftes"
+btwkeys          = "btwkeys"
+crediteuren      = "crediteuren"
+crediteurenstam  = "crediteurenstam"
+dagboeken        = "dagboeken"
+dagboekhistorie  = "dagboekhistorie"
+debiteuren       = "debiteuren"
+debiteurenstam   = "debiteurenstam"
+eindbalansen     = "eindbalansen"
+eindbalansregels = "eindbalansregels"
+eindcheck        = "eindcheck"
+grootboeksaldi   = "grootboeksaldi"
+grootboekstam    = "grootboekstam"
+inkoopfacturen   = "inkoopfacturen"
+journaal         = "journaal"
+kostenplaatsen   = "kostenplaatsen"
+meta             = "meta"
+notities         = "notities"
+pinbetalingen    = "pinbetalingen"
+stamgegevens     = "stamgegevens"
+verkoopfacturen  = "verkoopfacturen"
+voorkeuren       = "voorkeuren"
+
+[view]
+boekregels       = "vw_boekregels"
+btwkeys          = "vw_btwkeys"
+btwrubrieken     = "vw_btwrubrieken"
+grootboekstam    = "vw_grootboekstam"
+grootboekstamsaldo = "vw_grootboekstamsaldo"
+dagboeken        = "vw_dagboeken"
+
+[aux]
+
+;; Dagboektypen
+
+typearray[] = 'begin'
+typearray[] = 'memo'
+typearray[] = 'kas'
+typearray[] = 'bank'
+typearray[] = 'inkoop'
+typearray[] = 'verkoop'
+typearray[] = 'pin'
+
+; __END__ ;

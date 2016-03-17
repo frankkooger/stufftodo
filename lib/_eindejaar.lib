@@ -1,0 +1,621 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=0
+/**
+* @version		$Id: _eindejaar.lib 289 2015-01-04 09:09:40Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+require_once('_grootboek.lib');
+
+Class Eindejaar {
+  var $grootboek;
+
+  
+  /* ****************************************************************
+  * @METHOD:   __construct() 
+  * @SYLLABUS: Constructor
+  *   Deze class maakt geen eigen dbConnector aan. Dit betekent niet dat de methoden
+  *   uit deze class gebruikt kunnen worden in de vorm:
+  *     Eindejaar::<methode>
+  *   omdat in de methodes gebruik wordt gemaakt van $this->..
+  *
+  *****************************************************************{{{ */
+  public function __construct() {
+    $this->file = basename(__FILE__);
+
+    $this->openPointer();
+
+    // schakel historiemodus uit
+    //$this->db->grootboekstam        = '"'.$GLOBALS['config']->data['tbl']['grootboekstam'].'"';
+    $this->db->grootboekstam        = '"'.$GLOBALS['config']->data['view']['grootboekstamsaldo'].'"';
+    $this->db->dagboeken            = '"'.$GLOBALS['config']->data['tbl']['dagboeken'].'"';
+
+    $this->grootboek = new Grootboek();
+
+    $this->eindbalansselect = 'SELECT r."grootboekrekening", r."grootboeknaam", r."debet", r."credit", r."saldo" '
+                             ."FROM {$this->db->eindbalansen} AS b LEFT JOIN {$this->db->eindbalansregels} AS r ON (b.\"id\"=r.\"ideindbalans\") "
+                             ."WHERE b.\"boekjaar\"={$this->db->boekjaar}";
+
+    //$this->grbstam = 'grootboekstam'.$this->db->lopendjaar['value'];
+    //$this->dagboeken = 'dagboeken'.$this->db->lopendjaar['value'];
+
+    printrc2($this);
+
+  } // END FUNCTION __construct }}}
+
+
+  /********************************************************************* 
+  * @METHOD: void openPointer() 
+  * @RETURNS:   
+  * @SYLLABUS:  
+  *    Opent een db pointer 
+  * 
+  /* *********************************************************************{{{ */ 
+  function openPointer() {
+
+    $this->db = &$GLOBALS['stam'];
+    return(true);
+
+  } // END METHOD openPointer}}} 
+ 
+
+  /* ****************************************************************
+  * @METHOD:   checkEindejaarcheck() 
+  * @SYLLABUS: 
+  *   Bepaal of de eindejaar-itemregels voor een nieuw boekjaar in de eindejaaritem
+  *   tabel al zijn aangemaakt.
+  *
+  *****************************************************************{{{ */
+  function checkEindejaarcheck() {
+     
+    return( ($this->db->Get_field('COUNT("id")', $this->db->eindcheck, "\"boekjaar\"={$this->db->boekjaar}", $this->file."::".__FUNCTION__."::".__LINE__)) ? true : false);
+     
+  } // END FUNCTION checkEindejaarcheck }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   initEindejaar() 
+  * @SYLLABUS: 
+  *   Maakt de eindejaar-itemregels voor een nieuw boekjaar in de eindejaar-itemtabel.
+  *
+  *****************************************************************{{{ */
+  function initEindejaar() {
+    global $msg;
+
+    $items = array();
+
+    $items[] = array('label'=>'Zijn de Eindejaars memoriaalposten gemaakt?', 'naam'=>'memoriaal', 'type'=>0, 'value'=>2, 'tekst'=>'De laatste memoriaalposten van het boekjaar');
+
+    $items[] = array('label'=>'Zijn alle BTW periodes geconsolideerd?', 'naam'=>'consolidatie', 'type'=>0, 'value'=>2, 'tekst'=>'');
+
+    $items[] = array('label'=>'Backup maken', 'naam'=>'backup', 'type'=>1, 'value'=>0, 'tekst'=>'Maak een backup van de huidige administratie voordat hij wordt gelockt/afgesloten. Als dit is gebeurd kan er niet meer geboekt worden in het boekjaar.');
+
+    $items[] = array('label'=>'Controleren grootboeksaldi', 'naam'=>'herstel', 'type'=>1, 'value'=>0, 'tekst'=>'Voor zekerheid, herstel de grootboeksaldi');
+
+    $items[] = array('label'=>'Zijn Proef- en Saldibalans uitgedraaid?', 'naam'=>'balansen', 'type'=>0, 'value'=>2, 'tekst'=>'');
+
+    $items[] = array('label'=>'Zijn de Grootboekkaarten uitgedraaid?', 'naam'=>'grootboekkaarten', 'type'=>0, 'value'=>2, 'tekst'=>'Draai alle grootboekkaarten van het boekjaar uit. Print naar pdf voor archiefdoeleinden.');
+
+    $items[] = array( 'label'=>'Eindbalans consolideren', 'naam'=>'eindbalans', 'type'=>1, 'value'=>0, 'tekst'=>'Leg debet, credit totalen en saldo per grootboekkaart vast in eindbalansen en eindbalansregels.');
+
+    $items[] = array( 'label'=>'Beginbalans nieuwe jaar', 'naam'=>'beginbalans', 'type'=>1, 'value'=>0, 'tekst'=>'Beginbalans journaalpost aanmaken voor het nieuwe jaar. De journaalpost is altijd nr. 1, moet er ook voor gereserveerd blijven, ook als er al boekingen in het nieuwe jaar zijn gedaan en nog geen beginbalans. Als de beginbalans boeking er al is, update vanuit de afsluiting, anders insert een nieuw.');
+
+    // Voeg sortering toe aan items
+    //
+    $sortering = 0;
+
+    printrc2($items, "items in initEindejaar: \n");
+
+    // En voeg de items toe aan de table eindcheck
+    //
+    $id = $this->db->newId($this->db->eindcheck);
+    foreach($items AS $key=>$val) {
+      $sortering += 5;
+      $this->db->query = 'INSERT INTO '.$this->db->eindcheck.' ("id","boekjaar", "sortering", "label", "naam", "type", "value", "tekst") '
+                        ."VALUES({$id}, {$this->db->boekjaar}, {$sortering}, '{$val['label']}', '{$val['naam']}', {$val['type']}, {$val['value']}, '{$val['tekst']}')";
+      $this->db->Do_sql($this->file."::".__FUNCTION__."::".__LINE__);
+      $id++;
+    }
+
+    return(true);
+
+  } // END FUNCTION initEindejaar }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   proefbalansObjecten() 
+  * @SYLLABUS: 
+  *   Verzamelt de debet- en credittotalen en de saldi per grootboekrekening.
+  *   Geeft het resultaat terug in een verzameling objecten. Wordt gebruikt in
+  *   het printen van de proefbalans en de eindbalansboeking.
+  *
+  *****************************************************************{{{ */
+  function proefbalansObjecten() {
+    global $msg;
+
+    // haal de grootboekrekeningen van grootboeksaldi, hierop staan alle
+    // rekeningen van een boekjaar, ook met 0-saldi maar niet met 0-boekingen
+    // Update
+    // Dit hoeft niet meer via grootboeksaldi en kan nu via de nieuwe view 
+    // vw_grootboekstamsaldo icm boekregels. 
+    $query=<<<EOT
+SELECT
+  b."grootboekrekening" As "nummer"
+  ,g."naam"
+  ,g."type"
+  ,SUM(CASE WHEN "bedrag">0 THEN "bedrag" ELSE 0.00 END) AS "debet"
+  ,SUM(CASE WHEN "bedrag"<0 THEN "bedrag" ELSE 0.00 END) AS "credit" 
+  ,SUM("bedrag") AS "delta" 
+FROM {$this->db->boekregels} b
+LEFT JOIN {$this->db->grootboekstam} g
+ON b."grootboekrekening"=g."nummer"
+WHERE 
+  b."boekjaar"={$this->db->boekjaar}
+GROUP BY
+  b."grootboekrekening",g."naam",g."type"
+ORDER BY
+  "grootboekrekening"
+EOT;
+
+    $this->db->Do_query($query, $this->file."::".__FUNCTION__."::".__LINE__);
+    $arr = array();
+
+    while($obj = $this->db->Do_object()) { $arr[$obj->nummer] = $obj; }
+
+/*
+    printrc2($arr);
+<pre>Array
+(
+    [100] => stdClass Object
+        (
+            [nummer] => 100
+            [naam] => Inventaris
+            [type] => 1
+            [debet] => 3103.58
+            [credit] => 0.00
+            [delta] => 3103.58
+        )
+
+    [150] => stdClass Object
+        (
+            [nummer] => 150
+            [naam] => Afschrijving Inventaris
+            [type] => 1
+            [debet] => 0.00
+            [credit] => -1218.11
+            [delta] => -1218.11
+        )
+*/
+    //
+    // bereken Delta
+    //
+    $saldowinst = $saldobalans = '0.00';
+
+    foreach($arr AS $key=>$obj) {
+      if($obj->type == 1) $saldobalans += $obj->delta;
+      elseif($obj->type == 2) $saldowinst += $obj->delta;
+    } // END foreach obj
+
+    $arr['saldobalans'] = $saldobalans;
+    $arr['saldowinst'] = $saldowinst;
+    printrc2($arr);
+
+    return($arr);
+
+  } // END FUNCTION proefbalansObjecten }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   eindbalansBoeking() 
+  * @SYLLABUS: 
+  *   Verzamelt de debet- en credittotalen en de saldi per grootboekrekening.
+  *   Zet van de rekeningen met een saldo regels naar eindbalansen en
+  *   eindbalansregels. Hierna zouden de boekregels feitelijk kunnen worden
+  *   verwijderd maar we laten ze staan voor terugzoeken in de
+  *   historie van journaalposten.
+  *
+  *****************************************************************{{{ */
+  function eindbalansBoeking() {
+    global $msg;
+
+    // Controleer eerst of er al een dergelijke boeking bestaat in eindbalansen. If so: verwijder die en geef rode msg.
+    //
+    if($tmp = $this->db->Get_field('"id"', $this->db->eindbalansen, "\"boekjaar\"={$this->db->boekjaar} ORDER BY \"id\" DESC", $this->file."::".__FUNCTION__."::".__LINE__)) { // er is er een
+      $msg['red'][] = "Er is al een eindbalans boeking van dit boekjaar!";
+      $msg['red'][] = "Ik verwijder deze nu eerst.";
+      if($this->db->Delete_record($this->db->eindbalansregels, "\"ideindbalans\"={$tmp}", $this->file."::".__FUNCTION__."::".__LINE__)) {
+        if($this->db->Delete_record($this->db->eindbalansen, "\"id\"={$tmp}", $this->file."::".__FUNCTION__."::".__LINE__)) {
+          $msg['blue'][] = "Eindbalans boeking van boekjaar {$this->db->boekjaar}is verwijderd.";
+        }
+        else {
+          $msg['red'][] = "Kon bestaande eindbalans boeking niet verwijderen!";
+          return(false);
+        }
+      }
+      else {
+        $msg['red'][] = "Kon bestaande eindbalansregel boekingen niet verwijderen!";
+        return(false);
+      }
+    }
+
+    // haal de grootboekrekeningen van grootboeksaldi, hierop staan alle rekeningen van een boekjaar, ook met 0-saldi.
+    //
+    $arr = $this->proefbalansObjecten();
+
+    // Haal saldobalans en saldowinst eruit
+    //
+    foreach($arr AS $key=>$obj) {
+      // saldobalans en saldowinst zijn aan de array toegevoegde strings; haal die eruit
+      //
+      if(!is_object($obj)) {
+        if($key == 'saldobalans') {
+          $saldobalans = $obj;
+          unset($arr[$key]);
+        }
+        elseif($key == 'saldowinst') {
+          $saldowinst = $obj;
+          unset($arr[$key]);
+        }
+      }
+    } // END FOREACH
+
+    // We hebben nu de saldi en de debet-credit bedragen. Maak nu per obj een regel in eindbalansregels
+    //
+    // Maak eerst de eindbalansen regel
+    //
+    if($saldowinst < 0) { // indien een -bedrag betreft het een saldo winst
+      $saldowinst *= -1; // zet de polariteit goed voor presentatie in de kolom saldowinst
+      $saldoverlies = 0;
+    }
+    else {
+      $saldoverlies = $saldowinst;
+      $saldowinst = 0;
+    }
+    $saldobalans *= -1; // zet de polariteit goed
+
+    $id = $this->db->newId($this->db->eindbalansen);
+
+    $this->db->Do_query('INSERT INTO '.$this->db->eindbalansen.' ("id","boekdatum","boekjaar","saldowinst","saldoverlies","saldobalans") '
+                       ."VALUES ({$id},'{$GLOBALS['timer']->vandaagIso}',{$this->db->boekjaar},'{$saldowinst}','{$saldoverlies}','{$saldobalans}')", $this->file."::".__FUNCTION__."::".__LINE__);
+    $lastid = $id;
+
+    // Nu de eindbalansregels
+    //
+    $id = $this->db->newId($this->db->eindbalansregels);
+
+    foreach($arr AS $key=>$obj) {
+      (!$obj->debet)  && $obj->debet = '0.00';
+      (!$obj->credit) && $obj->credit = '0.00';
+      (!$obj->delta)  && $obj->delta = '0.00';
+      $this->db->Do_query('INSERT INTO '.$this->db->eindbalansregels.' ("id","ideindbalans","grootboekrekening","grootboeknaam","debet","credit","saldo") '
+                         ."VALUES ({$id},{$lastid},{$obj->nummer},'{$obj->naam}','{$obj->debet}','{$obj->credit}','{$obj->delta}')", $this->file."::".__FUNCTION__."::".__LINE__);
+      $id++;
+    } // END foreach
+
+    return(true);
+
+  } // END FUNCTION eindbalansBoeking }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   beginbalansBoeking() 
+  * @SYLLABUS: 
+  *   Berekent het privesaldo naar de rekening Kapitaal
+  *   Berekent het balanssaldo naar de rekening Kapitaal
+  *   Boekt de balanssaldi naar de journaalpost 'beginbalans' van het nieuwe boekjaar.
+  *
+  *****************************************************************{{{ */
+  function beginbalansBoeking() {
+    global $msg, $stam;
+
+    // vereiste rekeningen in stamgegevens controleren en opvragen
+    //
+    if(! $kapitaalrekening = $stam->existRekening('rkg_kapitaalprive')) return(false);
+    if(! $priverekening = $stam->existRekening('rkg_priverekeningcourant')) return(false);
+    
+    require_once('_journaal.lib');
+    $post = new Journaalpost();
+
+    // Maak journaalboekjaar geschikt voor boeking in het nieuwe jaar.
+    // LET OP: Maak in de procedure verder gebruik van post->boekjaar omdat die wordt opgehoogd en niet van stam->boekjaar !!
+    //
+    $post->ophogenBoekjaar();
+
+    // De beginbalans boeking moet journaalpost 1 krijgen. Als die journaalpost
+    // al bestaat omdat 'ie in het nieuwe jaar handmatig is geboekt, moet 'ie
+    // nu eerst weer verwijderd worden om plaats te maken voor deze,
+    // automatische boeking.
+    //
+    $this->db->Do_query("SELECT * FROM {$stam->journaal} WHERE \"journaalpost\"=1 AND \"boekjaar\"='{$post->boekjaar}'", $this->file."::".__FUNCTION__."::".__LINE__);
+    if($obj = $this->db->Do_object()) {
+      // bestaat, verwijder eerst indien een beginbalans boeking en geef message
+      //
+      if($obj->dagboekcode != 'begin') { // het blijkt geen beginbalans boeking, geef msg en stop
+        $msg['red'][] = "Er bestaat een journaalpost 1 in het nieuwe boekjaar maar het is geen beginbalans boeking. Stop verwerking!";
+        return(false);
+      }
+      else { // het is wel een beginbalansboeking
+        // Denk erom dat deze boeking moet plaatsvinden in het nieuwe boekjaar.
+        // Verhoog daarom tijdelijk stam->boekjaar om te zorgen dat het juiste
+        // journaalid kan worden ingelezen van vw_journaalposten.
+        $presentyear = $stam->boekjaar;
+        $stam->changeData('lopendjaar',$post->boekjaar);
+        if($post->deletePost($obj->journaalid)) {
+          $msg['red'][] = "Er bestaat een beginbalans journaalpost 1 in het nieuwe boekjaar!";
+          $msg['red'][] = "Deze is nu eerst verwijderd en wordt vervangen door de automatische boeking.";
+        }
+        // zet het huidige boekjaar weer terug
+        $stam->changeData('lopendjaar',$presentyear);
+      }
+    }
+
+    $datum = $post->boekjaar."-01-01";
+
+    $cobj = new Dummy();
+    $cobj->journaalpost = 1;
+    $cobj->boekjaar = $post->boekjaar;
+    $cobj->datum = $datum;
+    $cobj->periode = 0;
+    $cobj->dagboekcode = "begin";
+    $cobj->jomschrijving = "Beginbalans";
+    $cobj->saldo = "0.00";
+    $cobj->joorsprong = "begin";
+    $cobj->tekst = "Automatische boeking van beginbalans in het nieuwe boekjaar";
+
+    if(! $journaalid = $post->opslaanJournaalpost($cobj)) {
+      $msg['red'][] = "Kan journaalboeking van beginbalans niet doen!";
+      return(false);
+    }
+
+    // Dan de boekingsregels
+    //
+    // Alvorens we kunnen boeken moeten het saldo prive rekeningcourant en het
+    // balanssaldo wordt verwerkt in Kapitaal. prive rekeningcourant is dus
+    // leeg als we het nieuwe jaar ingaan en de balans is in evenwicht doordat
+    // het balanssaldo is opgenomen in Kapitaal.
+    // We maken geen boekingen van deze berekeningen, slechts de berekening om
+    // het Kapitaal en prive saldi goed in de beginbalans op te nemen, dus het
+    // resultaat van deze berekening is te vinden in de beginbalans en niet in
+    // de eindbalans of de eind-grootboeksaldi ( TODO hoewel we het resultaat ook
+    // nodig hebben bij het ingeven van de aangifte inkomstenbelasting;
+    // daarvoor moeten we nog een truc verzinnen!).
+    //
+    // Het saldo prive rekeningcourant en Kapitaal halen van eindbalansregels;
+    // Het balanssaldo halen we van eindbalansen
+    //
+    
+    // Wat is het privesaldo? Haal het van eindbalansregels
+    // 
+    $this->db->Do_query($this->eindbalansselect." AND r.\"grootboekrekening\"={$priverekening}", $this->file."::".__FUNCTION__."::".__LINE__);
+    if(! $obj = $this->db->Do_object()) {
+      $msg['red'][] = "Kan privesaldo van eindbalans niet bepalen!";
+      return(false);
+    }
+    
+    // Wat is het balanssaldo? Haal het van eindbalansen oude jaar
+    // 
+    if(! $balanssaldo = $this->db->Get_field('"saldobalans"', $this->db->eindbalansen, "\"boekjaar\"={$this->db->boekjaar}", $this->file."::".__FUNCTION__."::".__LINE__)) {
+      $msg['red'][] = "Kan balanssaldo van eindbalans niet bepalen!";
+      return(false);
+    }
+
+    // Haal alle balansrekeningen op van eindbalansregels met een saldo
+    //
+    $query =<<<EOT
+SELECT * FROM "vw_grootboekstamsaldo" g
+WHERE g."type"=1
+AND g."saldo" <> 0
+EOT;
+    $this->db->Do_query($query, $this->file."::".__FUNCTION__."::".__LINE__);
+    $arr = array();
+    while($obj = $this->db->Do_object()) { $arr[] = $obj; }
+
+    // Bewerk de objecten zodanig dat ze direct ingeboekt kunnen worden.
+    //
+/*
+printrc1($arr,"arr van objecten: \n");
+[5] => stdClass Object
+(
+  [id] => 23
+  [naam] => Betaalde BTW
+  [nummer] => 2300
+  [nivo] => 0
+  [type] => 1
+  [btwkey] => 5
+  [populariteit] => 1
+  [saldo] => -532.00
+
+case 'journaalid'        : if($val != '') { $fields .= ",journaalid"; $values .=",{$val}"; } break;
+case 'boekjaar'          : if($val != '') { $fields .= ",boekjaar"; $values .=",{$val}"; } break;
+case 'datum'             : if($val != '') { $fields .= ",datum"; $values .=",'{$val}'"; } break;
+case 'grootboekrekening' : if($val != '') { $fields .= ",grootboekrekening"; $values .=",{$val}"; } break;
+case 'btwrelatie'        : if($val != '') { $fields .= ",btwrelatie"; $values .=",'{$val}'"; } break;
+case 'factuurrelatie'    : if($val != '') { $fields .= ",factuurrelatie"; $values .=",'{$val}'"; } break;
+case 'relatie'           : if($val != '') { $fields .= ",relatie"; $values .=",'{$val}'"; } break;
+case 'nummer'            : if($val != '') { $fields .= ",nummer"; $values .=",'{$val}'"; } break;
+case 'boorsprong'        : if($val != '') { $fields .= ",oorsprong"; $values .=",'{$val}'"; } break;
+case 'bomschrijving'     : if($val != '') { $fields .= ",bomschrijving"; $values .=",'{$val}'"; } break;
+case 'bedrag'            : if($val != '') { $fields .= ",bedrag"; $values .=",'{$val}'"; } break;
+*/
+
+    $kapitaal = false;
+    foreach($arr AS $key=>$cobj) { 
+      // Haal eerst het privesaldo eruit en zet prive op 0
+      // Kijk tevens of er een kapitaalrekening is, zo niet maak er een
+      if($cobj->nummer == $priverekening) { 
+        $egalisatie = $cobj->saldo;
+        unset($arr[$key]);
+      }
+      if($cobj->nummer == $kapitaalrekening) { $kapitaal = true; }
+    }
+
+    if(!$kapitaal) { // Maak een beginbalans boeking op de kapitaalrekening
+      $cobj = new Dummy();
+      $cobj->journaalid = $journaalid;
+      $cobj->boekjaar = $post->boekjaar;
+      $cobj->datum = $datum;
+      $cobj->nummer = $kapitaalrekening;
+      $cobj->boorsprong = 'begin';
+      $cobj->bomschrijving = 'Beginbalans';
+      $cobj->saldo = '0.00';
+      $arr[] = $cobj;
+    }
+
+    foreach($arr AS $key=>$cobj) { 
+      // Haal dan het Kapitaal eruit en maak berekening met prive en balanssaldo
+      if($cobj->nummer == $kapitaalrekening) {
+        $arr[$key]->saldo += $egalisatie;
+        $arr[$key]->saldo += $balanssaldo;
+      }
+    }
+
+    foreach($arr AS $key=>$cobj) { 
+      // Maak de overgebleven objecten nu geschikt als boekregelobjecten.
+        $arr[$key]->journaalid = $journaalid;
+        $arr[$key]->boekjaar = $post->boekjaar;
+        $arr[$key]->datum = $datum;
+        $arr[$key]->grootboekrekening = $arr[$key]->nummer;
+        $arr[$key]->boorsprong = 'begin';
+        $arr[$key]->bomschrijving = 'Beginbalans';
+        $arr[$key]->bedrag = $arr[$key]->saldo;
+        // Verwijder enkele waarden die de boekregelboeking in de war brengen.
+        unset($arr[$key]->id); // TODO welke id is dit?!
+        unset($arr[$key]->nummer);
+    }
+
+    // Sorteer deze array op cobj->grootboekrekening zodat ze in de journaalpost netjes gesorteerd komen staan
+    //
+    function cmp($a,$b) {
+      if ($a->grootboekrekening == $b->grootboekrekening) return 0;
+      return ($a->grootboekrekening > $b->grootboekrekening) ? +1 : -1;
+    }
+    usort($arr,"cmp");
+
+    // FINALLY: boek de boekregelobjecten
+    //
+    foreach($arr AS $key=>$cobj) { 
+      $post->opslaanBoekregel($cobj);
+    }
+
+    $post->verlagenBoekjaar();
+
+    return(true);
+    
+  } // END FUNCTION beginbalansBoeking }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   kapitaalBoeking() 
+  * @SYLLABUS: 
+  *   Boekt het winst/verliessaldo op de rekening Kapitaal
+  *   Boekt het privesaldo op de rekening Kapitaal
+  *
+  *****************************************************************{{{ */
+  function kapitaalBoeking() {
+    global $msg, $stam;
+
+    // vereiste rekeningen in stamgegevens controleren en opvragen
+    //
+    if(! $kapitaalrekening = $stam->existRekening('rkg_kapitaalprive')) return(false);
+    if(! $priverekening = $stam->existRekening('rkg_priverekeningcourant')) return(false);
+    
+    require_once('_journaal.lib');
+    $post = new Journaalpost();
+
+    $datum = $this->db->boekjaar."-12-31";
+
+    $cobj = new Dummy();
+    $cobj->boekjaar = $this->db->boekjaar;
+    $cobj->datum = $datum;
+    $cobj->periode = $this->db->periodeextra['value'];
+    $cobj->dagboekcode = "memo";
+    $cobj->jomschrijving = "Eindejaars Kapitaalboekingen";
+    $cobj->saldo = "0.00";
+    $cobj->joorsprong = "eindejaar";
+    $cobj->tekst = "Automatische boeking van winst/verliessaldo en privesaldo op Kapitaal";
+    $cobj->tekst = "Automatische boeking van privesaldo op Kapitaal";
+
+    $journaalid = $post->opslaanJournaalpost($cobj);
+
+    printrc2($cobj, "journaalb oeking: \n");
+
+    // Dan de boekingsregels
+    //
+    // Boek het privesaldo naar Kapitaal
+    //
+    // Bij het bepalen van de beginbalans nieuwe jaar lopen we dan weer opnieuw
+    // de boekregels door van alleen de balansrekeningen en gebruiken dat voor
+    // de beginbalans. Met deze priveboeking erbij is de eindbalans immers niet
+    // meer kloppend. Het balanssaldo (verschil tussen debet en credit)
+    // verwerken we tijdens beginbalans in Kapitaal. We boeken dus geen
+    // balanssaldo naar kapitaal met een reguliere journaalpost want die zou
+    // eenzijdig uit balans zijn.
+    // 
+    $cobj = new Dummy();
+    $cobj->journaalid = $journaalid;
+    $cobj->boekjaar = $this->db->boekjaar;
+    $cobj->datum = $datum;
+    $cobj->boorsprong = 'eindejaar';
+
+    // Boeking van het privesaldo naar kapitaal
+    //
+    // Wat is het privesaldo? Haal het van eindbalansregels
+    // 
+    $this->db->Do_query($this->eindbalansselect." AND r.\"grootboekrekening\"={$priverekening}" ,$this->file.'::'.__FUNCTION__.'::'.__LINE__ );
+    if(! $obj = $this->db->Do_object()) {
+      $msg['red'][] = "Kan privesaldo van eindbalans niet bepalen!";
+      return(false);
+    }
+
+    printrc2($obj,"privesaldo van de eindbalans: \n");
+    $cobj->grootboekrekening = $priverekening;
+    $cobj->bedrag = $obj->saldo;
+    $cobj->bedrag *= -1;
+    $cobj->bomschrijving = "Naar Kapitaal";
+
+    printrc2($cobj, "boekregel oeking: \n");
+
+    $post->opslaanBoekregel($cobj);
+    
+    // TegenBoeking van het privesaldo naar kapitaal
+    //
+    $cobj->grootboekrekening = $kapitaalrekening;
+    $cobj->bedrag = $obj->saldo;
+    $cobj->bomschrijving = "Van Prive Rekeningcourant";
+
+    if($post->opslaanBoekregel($cobj))
+      return(true);
+
+    printrc2($cobj, "boekregel Tegenboeking: \n");
+
+  } // END FUNCTION kapitaalBoeking }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   maakHistorieTabellen() 
+  * @METHOD: bool maakGrootboekstamHistorie(  ) 
+  * @METHOD: bool maakDagboekenHistorie(  ) 
+  * 
+  * deze methods worden niet meer gebruikt sinds grootboekstam en dagboeken
+  * een eigen historiemechanisme hebben.
+  *
+  *****************************************************************{{{ */
+
+} // END CLASS Eindejaar
+
+/* __END__ */

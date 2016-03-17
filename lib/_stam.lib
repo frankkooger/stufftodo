@@ -1,0 +1,518 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _stam.lib 296 2015-04-04 16:31:52Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+
+/* ****************************************************************
+* @CLASS:   Stam extends DbFactory() 
+* @PARAMETERS: 
+* @RETURNS: void
+* @SYLLABUS: 
+*   Lees alle stamgegevens in en stop in een object
+*   Verandert gewenste stamgegevens-values in de stamgegevens tabel
+*   De geladen gegevens zijn beschikbaar als:
+*   obj->naam[value] en obj->naam[label]
+*
+*****************************************************************{{{ */
+Class Stam extends DbFactory { 
+  var $boekjaar='';
+  var $huidigeperiode='';
+
+
+  /* ****************************************************************
+  * @METHOD:   void __construct() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  public function __construct() {
+
+    $this->file = basename(__FILE__);
+
+    // maak voor tabellen in views zonodig een aparte entry met de extentie 'tbl'. Deze hebben we nodig
+    // voor updates en inserts (DML statements); dat gaat niet via de view.
+    $this->stam                 = '"'.$GLOBALS['config']->data['tbl']['stamgegevens'].'"';
+    $this->journaal             = '"'.$GLOBALS['config']->data['tbl']['journaal'].'"';
+    $this->boekregels           = '"'.$GLOBALS['config']->data['view']['boekregels'].'"';
+    $this->boekregelstbl        = '"'.$GLOBALS['config']->data['tbl']['boekregels'].'"';
+    $this->boekregels_trash     = '"'.$GLOBALS['config']->data['tbl']['boekregels_trash'].'"';
+    $this->eindcheck            = '"'.$GLOBALS['config']->data['tbl']['eindcheck'].'"';
+    $this->dagboeken            = '"'.$GLOBALS['config']->data['view']['dagboeken'].'"';
+    $this->dagboekentbl         = '"'.$GLOBALS['config']->data['tbl']['dagboeken'].'"';
+    $this->debiteurenstam       = '"'.$GLOBALS['config']->data['tbl']['debiteurenstam'].'"';
+    $this->crediteurenstam      = '"'.$GLOBALS['config']->data['tbl']['crediteurenstam'].'"';
+    $this->grootboekstamtbl     = '"'.$GLOBALS['config']->data['tbl']['grootboekstam'].'"';
+    $this->grootboekstam        = '"'.$GLOBALS['config']->data['view']['grootboekstam'].'"';
+    $this->grootboekstamsaldo   = '"'.$GLOBALS['config']->data['view']['grootboekstamsaldo'].'"';
+    $this->grootboeksaldi       = '"'.$GLOBALS['config']->data['tbl']['grootboeksaldi'].'"';
+    $this->dagboekhistorie      = '"'.$GLOBALS['config']->data['tbl']['dagboekhistorie'].'"';
+    $this->btwaangiftes         = '"'.$GLOBALS['config']->data['tbl']['btwaangiftes'].'"';
+    $this->btwkeys              = '"'.$GLOBALS['config']->data['view']['btwkeys'].'"';
+    $this->btwkeystbl           = '"'.$GLOBALS['config']->data['tbl']['btwkeys'].'"';
+    $this->btwrubrieken         = '"'.$GLOBALS['config']->data['view']['btwrubrieken'].'"';
+    $this->kostenplaatsen       = '"'.$GLOBALS['config']->data['tbl']['kostenplaatsen'].'"';
+    $this->inkoopfacturen       = '"'.$GLOBALS['config']->data['tbl']['inkoopfacturen'].'"';
+    $this->verkoopfacturen      = '"'.$GLOBALS['config']->data['tbl']['verkoopfacturen'].'"';
+    $this->pinbetalingen        = '"'.$GLOBALS['config']->data['tbl']['pinbetalingen'].'"';
+    $this->eindbalansen         = '"'.$GLOBALS['config']->data['tbl']['eindbalansen'].'"';
+    $this->eindbalansregels     = '"'.$GLOBALS['config']->data['tbl']['eindbalansregels'].'"';
+    $this->tableMeta            = '"'.$GLOBALS['config']->data['tbl']['meta'].'"';
+
+    if($this->openPointer())
+      $this->init();
+    else {
+      switch ($this->fout) {
+        case 'geen database' : die("Kan administratie niet initialiseren! Bestaat database '{$this->dbase}' wel?!"); break;
+        case 'geen connectie': die("Kan geen connectie maken met database '{$this->dbase}'! Is userid/passwd juist?!"); break;
+        default              : die("Fout tijdens verbinding met database '{$this->dbase}'!"); break;
+      }
+    }
+
+    $this->boekjaar  = $this->lopendjaar['value'];
+
+    // Completeer de naam van grootboekstam met het huidige boekjaar indien een afgesloten jaar
+    // we gaan dan in historie-mode
+    // Probleem is dat tijdens de eindejaarsverwerking na 1 aktie de blocked
+    // mode al actief is en het oude jaar gedurende de verwerking geen historie
+    // is. Dit lossen we op in _eindejaar.lib waarin historiemodus wordt opgeheven.
+    // Update
+    // Voor grootboekstam doen we dit niet meer omdat een view vw_grootboekstam de historie oplost.
+    // Voor dagboeken doen we het nog wel even maar ook daarvan gaan we de historie anders regelen.
+    //
+    if($this->boekjaarBlocked) {
+      //$this->grootboekstam  = '"'.$GLOBALS['config']->data['tbl']['grootboekstam'].$this->boekjaar.'"';
+      //$this->dagboeken  = '"'.$GLOBALS['config']->data['tbl']['dagboeken'].$this->boekjaar.'"';
+    }
+
+  } // END METHOD Stam }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   void init() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *    Initieert de objectdata. Dit is een aparte method omdat we hem ook apart
+  *    willen kunnen aanroepen en niet alleen ten tijde van object initiatie.
+  *
+  *****************************************************************{{{ */
+  function init() {
+    $this->readData();
+    $this->huidigePeriode();
+    $this->_boekjaarBlocked();
+    $this->_eersteJournaalpost();
+  } // END METHOD init }}}
+
+
+  /*********************************************************************
+  * @METHOD: void openPointer()
+  * @RETURNS:  
+  * @SYLLABUS: 
+  *    Opent een db pointer
+  *
+  /* *********************************************************************{{{ */
+  function openPointer() {
+    return(parent::__construct());
+  } // END METHOD openPointer }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   void readData() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *    Initieert de objectdata. Dit is een aparte method omdat we hem ook apart
+  *    willen kunnen aanroepen en niet alleen ten tijde van object initiatie.
+  *
+  *****************************************************************{{{ */
+  function readData() {
+    // voordat we alle data inlezen hebben we het opgeslagen boekjaar al nodig om de totaalquery te kunnen uitvoeren
+    $boekjaar = $this->Get_field("value", $this->stam, "\"naam\"='lopendjaar'", $this->file."::".__FUNCTION__."::".__LINE__);
+    $this->query = 'SELECT "label","naam","value" FROM '.$this->stam
+                  .' WHERE "boekjaar" <= '.$boekjaar.' ORDER BY "code","subcode","boekjaar" ASC'; 
+    $this->Do_sql($this->file."::".__FUNCTION__."::".__LINE__); 
+    $exist = false;
+    while($obj = $this->Do_object()) {
+      $exist = true;
+      $this->{$obj->naam}['value'] = $obj->value;
+      $this->{$obj->naam}['label'] = $obj->label;
+    }
+    if(!$exist) {
+      die("De database '{$this->dbase}' bestaat maar het lijkt alsof er nog geen standaard administratie in is geladen!");
+      return(false);
+    }
+    else
+      return(true);
+  } // END METHOD readData }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   huidigePeriode() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *   Bepaal de huidige periode van het huidigboekjaar. Dit is de MAX periode
+  *   waarin boekingen hebben plaatsgevonden
+  *
+  *****************************************************************{{{ */
+  function huidigePeriode() {
+    $this->huidigeperiode = $this->Get_field('MAX("periode")',$this->journaal,"\"boekjaar\"={$this->lopendjaar['value']}", $this->file."::".__FUNCTION__."::".__LINE__);
+  } // END METHOD huidigePeriode }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   _boekjaarBlocked() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *    Bepaal of het boekjaar al wordt afgesloten en er daardoor geen boekingen
+  *    in dit boekjaar meer mogen plaatsvinden.
+  *
+  *****************************************************************{{{ */
+  function _boekjaarBlocked() {
+    // check de eindejaarsactiviteit-items
+
+    // Een boekjaar is geblokkerd als de beginbalans nieuwe jaar is geboekt.
+    $this->boekjaarBlocked = $this->Get_field('value', $this->eindcheck, "\"boekjaar\"={$this->lopendjaar['value']} AND \"naam\"='beginbalans'", $this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Een boekjaar is semi-geblokkerd zodra een actie heeft plaatsgevonden in
+    // eindejaar. Er kan dan niet meer geboekt worden maar de schermen zijn nog
+    // wel in het oude jaar op te vragen b.v. voor uitdraaien grootboekkaarten
+    // en saldibalansen.
+    $this->boekjaarSemiBlocked = $this->Get_field('COUNT("id")', $this->eindcheck, "\"boekjaar\"={$this->lopendjaar['value']} AND \"type\"=1 AND \"value\"<>0", $this->file."::".__FUNCTION__."::".__LINE__); 
+
+  } // END METHOD _boekjaarBlocked }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   _eersteJournaalpost() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *   Bepaal of dit de eerste journaalpost is die geboekt gaat worden. Die
+  *   journaalpost is nl voorbehouden aan beginbalans en mag alleen aan
+  *   beginbalans worden toegekend.
+  *
+  *****************************************************************{{{ */
+  function _eersteJournaalpost() {
+    $this->eersteJournaalpost = $this->Get_field('COUNT("journaalid")', $this->journaal, "\"boekjaar\"={$this->lopendjaar['value']}", $this->file."::".__FUNCTION__."::".__LINE__);
+    //$this->eersteJournaalpost++;
+  } // END METHOD eersteJournaalpost }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   writeData() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *   schrijft objecten terug die zijn opgeslagen in obj->arr[naam]. 
+  *   Elk veranderd object moet zijn aangevuld met het element 'changed'.
+  *   
+  *   Voorbeeld (met voorbeeldobject naam stam):
+  *
+  *     $stam->arr['afgeslotenperiodes']['changed'] = true;
+  *     $stam->arr['afgeslotenperiodes']['value'] = '2';
+  *     $stam->writeData();
+  *
+  *****************************************************************{{{ */
+  function writeData() {
+    // loop door de objectarray als die er is
+    if(isset($this->arr))
+      foreach($this->arr AS $key=>$val) 
+        if(isset($this->arr[$key]['changed']))  // veranderd, opslaan
+          $this->Do_query("UPDATE {$this->stam} SET \"value\"='{$this->arr[$key]['value']}' WHERE \"naam\"='{$key}'", $this->file."::".__FUNCTION__."::".__LINE__);
+  } // END METHOD writeData }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool changeData( str $naam, str $value[, bool $write=true] )
+  * @PARAMETERS: 
+  * @RETURNS: true on success, false otherwise
+  * @SYLLABUS: 
+  *   verander values in de objectenarray en tag ze met 'changed'
+  *   om ervoor te zorgen dat ze worden opgeslagen met de method
+  *   writeData. Deze opslag wordt onmiddelijk getriggerd door
+  *   de parm $write=true en kan door $write=false mee te geven
+  *   worden uitgesteld.
+  *     syntax: object->changeData(<elementnaam>,<nieuwe value>,[write=true])
+  *   
+  *   Voorbeeld (met voorbeeldobject naam stam):
+  *
+  *     $stam->changeData('afgeslotenperiodes','2')
+  *
+  *****************************************************************{{{ */
+  function changeData($naam,$value,$write=true) {
+    if(! $naam) return(false);
+    // controleer of de naam werkelijk bestaat. Hij moet dan als obj->naam geladen zijn.
+    if(!isset($this->$naam)) {
+      $GLOBALS['msg']['red'] = "Stamgegeven '{$naam}' bestaat niet! Een update is niet mogelijk.";
+      printbr("Stamgegeven '{$naam}' bestaat niet! Een update is niet mogelijk.");
+      return(false);
+    }
+    else {
+      $decimalvelden = array('btwverkoophoog','btwverkooplaag');
+      if(in_array($naam, $decimalvelden)) $value = str_replace(",",".",$value);
+      $this->arr[$naam] = array('value'=>$value,'changed'=>true);
+      if($write) $this->writeData();
+    }
+    return(true);
+  } // END METHOD changeData }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   jaarSelectbox() 
+  * @PARAMETERS: 
+  * @RETURNS: 
+  * @SYLLABUS: 
+  *   Vul het lopendjaar pulldown. Toon alle jaren waarvan boekingen in het
+  *   systeem aanwezig zijn en het jaar volgend op het huidig jaar vermits dat
+  *   niet het huidige kalenderjaar overschrijdt. Als het lopendjaar=2009 en het
+  *   is nu 2009 dan wordt niet 2010 getoond, dus het huidig kalenderjaar is
+  *   altijd bovengrens.
+  *   20150323 - Er blijkt dat we toch andere beginjaren moeten kunnen instellen!
+  *   Stel b.v. dat in 2015 nog een nieuwe administratie van 2013 wordt opgestart
+  *   dan moet dat instelbaar zijn zolang er nog geen boekingen aanwezig zijn.
+  *
+  *****************************************************************{{{ */
+  function jaarSelectbox() {
+    $years = $this->Get_array_field('DISTINCT "boekjaar"',$this->journaal, 'ORDER BY "boekjaar"', $this->file."::".__FUNCTION__."::".__LINE__);
+    $hetisnu = date("Y");
+    if(!empty($years)) {
+      $laatstejaar = $years[count($years)-1];
+      if($laatstejaar<$hetisnu) $years[] = ++$laatstejaar;
+    }
+    else {
+    // Als er geen journaalposten zijn (een schone administratie) geef dan het
+    // huidige jaar en sla dit tevens op in stamgegevens
+      /*
+      $years[] = $hetisnu;
+      $this->changeData('lopendjaar',$hetisnu,true);
+      $this->lopendjaar['value'] = $hetisnu;
+      */
+    // Dit veranderen we nu: haal het jaar uit de stamgegevens en toon dat.
+    // met alle jaren t.m. nu
+      $years[] = $this->boekjaar;
+      $this->lopendjaar['value'] = $this->boekjaar;
+    }
+
+    // Maak de jaren pulldown list
+    //
+    $str = "";
+    foreach($years AS $val) {
+      $str .= ($val == $this->lopendjaar['value']) ?
+        "<option selected='selected' value='{$val}'>{$val}</option>\n" :
+        "<option value='{$val}'>{$val}</option>\n";
+    }
+
+    return($str);
+  } // END METHOD jaarSelectbox }}}
+
+
+  /* ****************************************************************
+  * @METHOD: void  jaarSelect( str $jaar ) 
+  * @PARAMETERS: str $jaar: jaar dat wordt geselecteerd
+  * @RETURNS: void
+  * @SYLLABUS: 
+  *    Selecteer het huidigjaar, sla dit op in stamgegevens en laadt
+  *    stamgegevens opnieuw zodat het nieuw gekozen jaar actief wordt.
+  *
+  *****************************************************************{{{ */
+  function jaarSelect($jaar) {
+    // check validiteit van $jaar
+    if(! preg_match("/^[\d]{4}$/", $jaar)) return(false);
+
+    $this->query = "UPDATE {$this->stam} SET \"value\"='{$jaar}' WHERE \"naam\"='lopendjaar'";
+    if($this->Do_sql($this->file."::".__FUNCTION__."::".__LINE__)) {
+      // lees stamgegevens opnieuw in
+      $this->init();
+    }
+  } // END METHOD jaarSelect }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   int isBlocked( int $value, int $lopendjaar ) 
+  * @PARAMETERS: $value = grootboekrekeningnummer, $lopendjaar = huidigjaar
+  * @RETURNS: aantal boekingen indien true, anders false
+  * @SYLLABUS: 
+  *   Gaat in de tabel 'boekregels' na of er al boekingen op een stamrekening
+  *   zijn gepleegd. Met dit gegeven wordt het keuzevak in stamgegevens form
+  *   disabled.
+  *
+  *****************************************************************{{{ */
+  function isBlocked($value,$lopendjaar) {
+    if(!$value || !$lopendjaar) return(false);
+    return($this->Get_field('COUNT("boekregelid")',$this->boekregels,"\"grootboekrekening\"={$value} AND \"boekjaar\"={$lopendjaar}", $this->file."::".__FUNCTION__."::".__LINE__)); 
+  } // END METHOD isBlocked }}}
+
+
+  /* ****************************************************************
+  * @METHOD: array  namenLijst( [ bool $clijst=false ] ) 
+  * @PARAMETERS: 
+  * @RETURNS: array met items uit stamgegevens tabel
+  * @SYLLABUS: 
+  *   Haal een overzicht van namen uit de stamtabel. Indien clijst dan wordt de
+  *   lijst als array geformatteerd die wordt gebruikt om hidden variabelen te
+  *   zetten in form stamgegevens waarmee wordt bijgehouden welke items in het
+  *   form veranderd worden.
+  *
+  *****************************************************************{{{ */
+  function namenLijst($clijst=false) {
+    if(!$clijst)
+      return($this->Get_array_field('"naam"', $this->stam, '', $this->file."::".__FUNCTION__."::".__LINE__));
+    else {
+      //$this->Do_query("SELECT \"naam\" FROM {$this->stam} ORDER BY \"code\",\"subcode\" + 0", $this->file."::".__FUNCTION__."::".__LINE__);
+      $this->Do_query("SELECT \"naam\" FROM {$this->stam} ORDER BY \"code\",\"subcode\"", $this->file."::".__FUNCTION__."::".__LINE__);
+      $arr = array();
+      while($obj = $this->Do_object()) {
+        $arr['c_'.$obj->naam]=false;
+      }
+      return($arr);
+    }
+  } // END METHOD namenLijst }}}
+
+
+  /********************************************************************* 
+  * @METHOD: str existRekening( str $key ) 
+  * @RETURNS:  string 
+  * @SYLLABUS:  
+  *    Controleert of een rekeningnummer bestaat in stamgegevens en in grootboekstam. Dit wordt
+  *    gebruikt om te zien of boekingen kunnen worden gepleegd op
+  *    rekeningnummers die in stamgegevens zijn gekoppeld aan bepaalde
+  *    rekeningtypes zoals b.v.: rkg_kapitaalprive = 900
+  * 
+  /* *********************************************************************{{{ */ 
+  function existRekening($key) { 
+    global $msg;
+/*
+TODO VIEW voor al onderstaande acties:
+
+SELECT
+  s."id"
+  ,s."code"
+  ,s."subcode"
+  ,s."label"
+  ,s."naam"
+  ,s."value"
+  ,s."boekjaar"
+  ,g."nummer" As "grootboekrekening"
+  ,d."code" As "dagboek"
+FROM
+  "stamgegevens" As s
+LEFT JOIN
+  "vw_grootboekstam" As g
+ON
+  s."value"=CAST(g."nummer" As varchar(8))
+LEFT JOIN
+  "vw_dagboeken" As d
+ON
+  g."nummer"=d."grootboekrekening"
+WHERE
+    s."id" IN
+    (
+        SELECT MAX("id") FROM "stamgegevens"
+        WHERE "boekjaar" <= CAST((SELECT "value" FROM "stamgegevens" WHERE "naam"='lopendjaar') As SIGNED)
+        GROUP BY "naam"
+    )
+ORDER BY
+    s."code", s."subcode"
+
+Geeft:
+======
+31  b 7 Extra periode periodeextra                   5  2010  [null]  [null]
+7   e 1 Rekening kapitaal/prive rkg_kapitaalprive  900  2008  900     [null]
+33  e 3 Rekening kasboek  rkg_kasboek             1060  2010  1060    kas
+
+*/   
+    // bestaat de key in stamgegevens?
+    $nummer = $this->Get_field("value", $this->stam, "\"naam\"='{$key}'", $this->file."::".__FUNCTION__."::".__LINE__) ;
+    if($nummer === false) {
+      $msg['red'][] = "<img src='/img/helpbubble.gif' onClick=\"Help('Stamgegevens.rekeningNietgedefinieerd','Rekeningnummer is niet gedefinieerd');\" style='width:15px;'>"
+                     ." De voor deze actie vereiste rekening: '{$key}' is niet gedefinieerd in stamgegevens!";
+      return(false);
+    }
+    // Als het rekeningnummer 0 is, dan is het item voor deze administratie niet relevant
+    if($nummer === '0') { // niet interessant, vergeet het verder
+      null;
+    }
+    elseif($nummer === '') { // nummer is leeg, dit is geen gewenste situatie
+      $label = $this->Get_field("label", $this->stam, "\"naam\"='{$key}'", $this->file."::".__FUNCTION__."::".__LINE__) ;
+      $msg['red'][] = "<img src='/img/helpbubble.gif' onClick=\"Help('Stamgegevens.rekeningnummerLeeg','Rekeningnummer is leeg');\" style='width:15px;'>"
+                     ." De rubriek: '{$label}' is gedefinieerd in stamgegevens maar het nummer is leeg. Herstel dit!";
+      return(false);
+    }
+    else { // bestaat de rekening in grootboekstam
+      if(! $this->Get_field('nummer', $this->grootboekstam, "\"nummer\"={$nummer}", $this->file."::".__FUNCTION__."::".__LINE__)) {
+        $label = $this->Get_field('"label"', $this->stam, "\"naam\"='{$key}'", $this->file."::".__FUNCTION__."::".__LINE__) ;
+        $msg['red'][] = "<img src='/img/helpbubble.gif' onClick=\"Help('Stamgegevens.rekeningnummerNietbekend','Rekeningnummer is niet bekend');\" style='width:15px;'>"
+                       ." Het vereiste rekeningnummer: '{$nummer}' ({$label}) is gedefinieerd in stamgegevens maar niet bekend in grootboekstam!";
+        return(false);
+      }
+    }
+
+    // Als aan alle voorwaarde is voldaan, return het rekeningnummer
+    return($nummer);
+  } // END METHOD existRekening}}} 
+
+
+  /********************************************************************* 
+  * @METHOD: str helpImg( str $rubriek, str $titel, int $padding ) 
+  * @RETURNS:  string 
+  * @SYLLABUS:  
+  *    Geeft een opgemaakte string in voor een helpurl.
+  *    padding is het aantal spaties dat aan de helpbubble vooraf gaat
+  * 
+  /* *********************************************************************{{{ */ 
+  function helpImg($rubriek,$titel,$padding=0) {
+    $tmp = '';
+    for($x=0;$x<$padding;$x++) $tmp .= '&nbsp;';
+    return($tmp."<img src='/img/helpbubble.gif' onClick=\"Help('$rubriek','$titel');\" style='cursor:help;width:15px;'>&nbsp;");
+  } // END METHOD helpImg}}}
+
+
+  /********************************************************************* 
+  * @METHOD: str helpDiv( str $rubriek, str $titel ) 
+  * @RETURNS:  string 
+  * @SYLLABUS:  
+  *    Geeft een opgemaakte string in voor een helpurl.
+  * 
+  /* *********************************************************************{{{ */ 
+  function helpDiv($rubriek,$titel) {
+    return("<div class='help' onClick=\"Help('{$rubriek}','{$titel}');\">&nbsp;</div>");
+  } // END METHOD helpDiv}}}
+
+
+  /**
+  * Cleanup formfield from unwanted characters
+  *
+  * @access    public
+  * @author    Frank Kooger frank@ml-design.com
+  * @param     string $stringtoclean
+  * @return    string, cleanedup string
+  */
+  function cleanFF($input) {
+    return(strtr($input,';<>!()`','       '));
+  }  // END FUNCTION cleanFF
+
+} // END CLASS Stam }}}
+
+/* __END__ */

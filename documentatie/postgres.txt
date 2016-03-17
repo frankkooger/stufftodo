@@ -1,0 +1,71 @@
+Windows
+=======
+
+Installeer postgresql op een standaard, door de installer opgegeven locatie, 
+b.v. voor versie 8.4.4-1:
+
+c:\Program Files\PostgreSQL\8.4
+
+Tijdens installatie:
+- Kies een password voor superuser (postgres). In ons voorbeeld nemen we 'masterkey'.
+- Poortnummer etc. doorklikken met 'Yes'
+- Launch geen stackbuilder aan het eind.
+
+De userid 'postgres/masterkey' is default gegeven tijdens de installatie van
+OpenAdmin.nl, indien gekozen wordt voor een postgres backend.
+
+Linux
+=====
+
+Database user
+-------------
+De Postgresql database-gebruiker in OpenAdmin.nl wordt geacht databases te kunnen aanmaken.
+Stel dat je een database-gebruiker 'webuser'/'password' wilt gebruiken. 
+Definieer dan (als root) de volgende gebruiker (ROLE in Postgresql termen):
+
+# su - postgres
+# psql -d template1
+template1#: CREATE USER webuser WITH PASSWORD 'password' CREATEDB CREATEROLE;
+
+Environment variabelen
+----------------------
+OpenAdmin.nl maakt voor het aanmaken van nieuwe databases, backup en restore gebruik van
+Postgresql commandline tools 'psql' en 'pg_dump'.
+Bij deze tools kan je geen password op de commandline meegeven; het password wordt uitgelzen
+uit de 'PGPASSWORD' environment-variabele.
+Als PHP in safe_mode draait (wat default niet het geval is) dan laat het
+alleen environment-variabelen toe die beginnen met 'PHP_'. 
+Om dit te voorkomen kan je 2 dingen doen:
+  - safe_mode = Off
+  - indien dat niet mogelijk is dan zet je: 
+    safe_mode_allowed_env_vars = PHP_,PG
+Dit kan je in php.ini doen of je maakt een apart ini-bestandje in /etc/php.d
+
+Als PHP niet in safe_mode draait hoef je niets te veranderen.
+
+Authorization schema
+--------------------
+De OpenAdmin.nl database-gebruiker maakt contact met Postgresql via een tcp
+poort en niet via een Unix domain socket. In het Postgesql authorization schema
+moet dat tot uitdrukking komen met de volgende regels (vooropgesteld dat je via
+localhost benadert):
+
+# IPv4 local connections:
+host    all         all         127.0.0.1/32          md5
+# IPv6 local connections:
+host    all         all         ::1/128               md5
+
+In Ubuntu (/etc/postgresql/8.4/main/pg_hba.conf) is dit de default instelling
+en hoef je niets te veranderen. 
+
+In CentOS/RedHat (/var/lib/pgsql/data/pg_hba.conf) is de default instelling
+'ident' ipv 'md5' en moet je dit veranderen. Als je de 'ident' instelling voor
+overige gebruikers in tact wilt laten kan je ook dit doen:
+
+# IPv4 local connections:
+host    all         webuser     127.0.0.1/32          md5
+host    all         all         127.0.0.1/32          ident
+# IPv6 local connections:
+host    all         webuser     ::1/128               md5
+host    all         all         ::1/128               ident
+

@@ -1,0 +1,2177 @@
+<?php // vim: syntax=php fdm=marker fdc=0 so=100
+/**
+* @version		$Id: _journaal.lib 296 2015-04-04 16:31:52Z otto $
+* @package		OpenAdmin.nl
+* @author     Frank Kooger
+* @copyright	Copyright (C) 2005 - 2009 Open Source Matters. All rights reserved.
+* @license		GNU/GPL, see LICENSE.php
+* OpenAdmin.nl is free software. This version may have been modified pursuant
+* to the GNU General Public License, and as distributed it includes or
+* is derivative of works licensed under the GNU General Public License or
+* other free or open source software licenses.
+* See COPYRIGHT.php for copyright notices and details.
+*/
+
+/**
+ *
+ * %%abstract%%
+ *
+ * @abstract
+ * @package		OpenAdmin.nl
+ * @since		1.0
+ */
+
+/* ****************************************************************
+* @CLASS:   Journaal
+* @SYLLABUS: 
+*   Deze class bevat methoden voor:
+*   - het opvragen van een journaalpost op basis van id of journaalpost/boekjaar
+*   - het opslaan van een nieuwe journaalpost
+*   - het updaten van een gemodificeerde journaalpost
+*   - het opslaan en updaten van boekingsregels en alle daarbij komende acties
+*   - het printen van journaalheaders en boekingsregel in een bestaande aForm
+*
+* LET OP: Deze class gebruikt methoden uit DateConnector object 'timer'
+*         Die class is te vinden in _oa.lib of _date.lib
+*         Als _oa.lib wordt geladen, wordt automatisch ook een object 'timer'
+*         geinitieerd maar _oa.lib moet dus wel eerder geladen zijn dat deze
+*         Journaal class.
+* 
+*****************************************************************{{{ */
+Class Journaal {
+  var $journaalid;
+  var $journaalpost;
+  var $boekjaar;
+  var $datum;
+  var $boekdatum;
+  var $periode=0; // periode kan niet leeg zijn ivb fouten tijdens sql
+  var $dagboekcode;
+  var $dagboektype;
+  var $dagboekgrootboekrekening;
+  var $jomschrijving;
+  var $bomschrijving;
+  var $tekst;
+  var $saldo;
+  var $boekregelsaldo;
+  var $boorsprong;
+  var $jrelatie;
+  var $joorsprong;
+  var $jnummer;
+  var $geconsolideerd;
+  var $code_gevonden=false; // hulpparm om aan te geven dat een dagboekcode is geselecteerd
+  var $boekregel = array();
+
+
+  /* ****************************************************************
+  * @METHOD:   Journaal() 
+  * @SYLLABUS: Constructor
+  *
+  *****************************************************************{{{ */
+  public function __construct($journaalid=0,$journaalpost=0,$processing=true,$boekjaar=0) {
+    global $stam;
+
+    // TODO We hebben ook in deze class het boekjaar gezet naar stam->boekjaar
+    // maar journaal kan een eigen boekjaar nodig hebben b.v. voor boeking van
+    // de beginbalans in het nieuwe jaar. Nog nakijken hoe we dat doen en wat
+    // we gebroken hebben door consequent het boekjaar naar stam->boekjaar te
+    // laten verwijzen.
+
+    // processing=false wordt o.a. gezet als het object alleen wordt gebruikt om journaalposten
+    // op te vragen zoals journaalprint:
+    // - het journaalsaldo wordt dan niet tijdens het inlezen van boekregels ge-update
+    // - er worden geen default dagboek-grootboekrekeningnummers bij de journaalpost opgevraagd
+    // - er wordt niet gevraagd of de journaalpost in een geconsolideerde periode valt
+    // - er wordt niet gecontroleerd op het bestaan van standaard rekeningen
+
+    $this->file = basename(__FILE__);
+
+    $this->boekjaar = $stam->boekjaar;
+
+    if($processing) {
+      // Controleer standaard rekeningen
+      //
+      // TODO deze controle moet er wel zijn maar de rkg_btw rekeningen staan tegenwoordig in btwkeys
+      //if(!$stam->existRekening('rkg_btwinkopen')) return(false);
+      //if(!$stam->existRekening('rkg_btwverkoophoog')) return(false);
+      //if(!$stam->existRekening('rkg_btwverkooplaag')) return(false);
+      if(!$stam->existRekening('rkg_debiteuren')) return(false);
+      if(!$stam->existRekening('rkg_crediteuren')) return(false);
+      if(!$stam->existRekening('rkg_pinbetalingen')) return(false);
+    }
+
+    // Laad een bestaande journaalpost indien een journaalid is meegegeven.
+    //
+    // Laad anders nog geen leeg object. Zo is het mogelijk na initiatie van
+    // het object zelf periode in te voegen en dat met getJournaalpost de
+    // juiste berekeningen erop uit te laten voeren (consolidatie).
+    // UPDATE: dit hebben we ondervangen door periode en dagboekcode in
+    // GLOBALS['p'] onder te kunnen brengen; deze worden in getEmptyJournaalpost
+    // gelezen en als default waarden in de lege journaalpost geplaatst.
+    //
+      return(!$this->getJournaalpost($journaalid,$journaalpost,$processing) ? false : true);
+
+  } // END FUNCTION Journaal }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   ophogenBoekjaar() 
+  * @SYLLABUS: 
+  *   Hoogt het interne boekjaar op met 1.
+  *   Wordt gebruikt bij boeking van b.v. beginbalans in het nieuwe boekjaar.
+  *
+  *****************************************************************{{{ */
+  function ophogenBoekjaar() {
+    $this->boekjaar++ ;
+  } // END FUNCTION ophogenBoekjaar }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   verlagenBoekjaar() 
+  * @SYLLABUS: 
+  *   Verlaagt het interne boekjaar weer met 1.
+  *   Wordt met name gebruikt na boeking van b.v. beginbalans in het nieuwe boekjaar.
+  *
+  *****************************************************************{{{ */
+  function verlagenBoekjaar() {
+    $this->boekjaar--;
+  } // END FUNCTION verlagenBoekjaar }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   getJournaalpost() 
+  * @SYLLABUS: 
+  *   Haal een journaalpost op en de bijbehorende boekregels op basis van een journaalid. 
+  *   Werk a.d.h.v. de bedragen in de boekregels het journaalpostsaldo bij.
+  *   Het laatste kan worden geskipt door $processing=false. Dit kan b.v.
+  *   gebeuren als een journaalpost alleen wordt opgevraagd voor weergave of
+  *   printen (of delete?!).
+  *   Bepaal tevens of de journaalpost in een geconsolideerde periode valt en
+  *   neem dat als attribuut in de journaalpost op (indien processing=true).
+  *
+  *   Als geen id of journaalid wordt gegeven, dan laadt een leeg object met
+  *   enkele data; default boekjaar, default periode en consolidatie van de periode
+  *
+  *****************************************************************{{{ */
+  function getJournaalpost($journaalid=0,$journaalpost=0,$processing=true,$loadboekregels=true) {
+    global $stam;
+
+    // Als geen journaalid is meegegeven, laad dan een leeg object met default data.
+    //
+    if(!$journaalid && !$journaalpost) {
+      return ($this->getEmptyJournaalpost() ? true : false);
+    }
+ 
+    // Query voor journaalpost
+    //
+    if($journaalid) $where = "\"journaalid\"={$journaalid}";
+    else if($journaalpost) $where = "\"journaalpost\"={$journaalpost}";
+    //
+    // controleer of het gevraagde journaalid bestaat en laad de journaalpost
+    //
+    if(!$obj = $stam->Get_object("SELECT * FROM \"vw_journaalposten\" WHERE {$where}", $this->file."::".__FUNCTION__."::".__LINE__)) return(false);
+
+    // zet de classparms voor deze journaalpost
+    //
+    foreach(get_object_vars ($obj) AS $key=>$val) $this->$key = $val;
+
+    // bepaal of de periode in een geconsolideerde periode valt; dit hoeft niet bij noprocessing
+    // noprocessing wordt o.a. gezet als het object alleen wordt gebruikt om journaalposten
+    // op te vragen zoals journaalprint
+    // controleer tevens of het journaalsaldo gelijk  is aan boekregelsaldo
+    //
+printrc2($obj->saldo, 'obj->saldo: ');
+printrc2($obj->boekregelsaldo, 'obj->boekregelsaldo: ');
+    if($processing) {
+      $this->geconsolideerd = $this->checkConsolidatie();
+      if($obj->saldo <> $obj->boekregelsaldo) {
+        if(empty($obj->boekregelsaldo)) $obj->boekregelsaldo = 0.00;
+        $GLOBALS['stam']->Do_query("UPDATE {$GLOBALS['stam']->journaal} SET \"saldo\"={$obj->boekregelsaldo} WHERE \"journaalid\"={$obj->journaalid}"
+                                   ,$this->file."::".__FUNCTION__."::".__LINE__);
+        // zet ook het objectsaldo anders wordt dat verkeerd gebruikt in het form
+        $this->saldo = $this->boekregelsaldo ;
+      }
+    }
+printrc2($this, 'boject is nu: ');
+/*
+Journaal Object
+(
+    [journaalid] => 541
+    [journaalpost] => 59
+    [boekjaar] => 2014
+    [datum] => 2014-08-30
+    [boekdatum] => 
+    [periode] => 3
+    [dagboekcode] => inkoop
+    [dagboektype] => inkoop
+    [dagboekgrootboekrekening] => 1600
+    [jomschrijving] => Nissan Kleine beurt
+    [bomschrijving] => 
+    [tekst] => 
+    [saldo] => 0.00
+    [boekregelsaldo] => 0.00
+    [boorsprong] => 
+    [jrelatie] => hofman
+    [joorsprong] => 
+    [jnummer] => 2014211
+    [geconsolideerd] => 
+    [code_gevonden] => 
+    [boekregel] => Array
+        (
+        )
+
+    [file] => _journaal.lib
+)
+*/
+    if($loadboekregels) {
+
+      // vul de boekstukregels van deze journaalpost
+      //
+      $stam->Do_query("SELECT * FROM \"vw_boekstuk\" WHERE {$where}",$this->file."::".__FUNCTION__."::".__LINE__);
+/*
+            [2851] => stdClass Object
+                (
+                    [journaalid] => 541
+                    [journaalpost] => 59
+                    [boekregelid] => 2851
+                    [boekdatum] => 2014-08-30
+                    [periode] => 3
+                    [boekjaar] => 2014
+                    [grootboekrekening] => 4450
+                    [kostenplaats] => 481200
+                    [kostennaam] => Autokosten
+                    [btwrelatie] => 2852
+                    [factuurrelatie] => 0
+                    [grootboeknaam] => Onderhoud auto
+                    [relatie] => hofman
+                    [nummer] => 2014211
+                    [boorsprong] => 
+                    [dagboekcode] => inkoop
+                    [jomschrijving] => Nissan Kleine beurt
+                    [bomschrijving] => Nissan Kleine beurt
+                    [bedrag] => 280.83
+                    [debet] => 0
+                    [credit] => 0
+                )
+*/
+      //
+      // lees de boekregelobjecten in het boekregel array
+      //
+      while($obj = $stam->Do_object())
+        $this->boekregel[$obj->boekregelid] = $obj;
+
+    } // END IF loadboekregels
+
+    return(true);
+
+  } // END FUNCTION getJournaalpost }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   getEmptyJournaalpost() 
+  * @SYLLABUS: 
+  *   Voeg standaard data (periode, geconsolideerd) toe aan een leeg journaalobject.
+  *   Als een GLOBALS['p'] (de standaard naam voor het object dat de meegegeven
+  *   parameters leest in de scripts) bekend is zal de methode hier periode en
+  *   dagboek uithalen voor zetten van default waarden.
+  *
+  *****************************************************************{{{ */
+  function getEmptyJournaalpost() {
+    global $p;
+
+    // Laad default de huidige periode. Als die nog niet bekend is in stam,
+    // laat dan de periode=0
+    //
+    if(! $GLOBALS['stam']->huidigeperiode == '')
+      $this->periode = $GLOBALS['stam']->huidigeperiode;
+
+    // Indien een periode en dagboekcode is meegegeven in de GET of POST parms, gebruik dan die.
+    // Vooropgesteld dat de Get of POST parms zijn gevangen in een globaal p=new Params() object.
+    //
+    if(isset($p)) {
+      (isset($p->periode) && $p->periode != '') and $this->periode = $p->periode;
+      (isset($p->dagboekcode) && $p->dagboekcode != '') and $this->dagboekcode = $p->dagboekcode;
+    }
+
+    // Als een dagboekcode geladen is, zoek dan het dagboektype erbij
+    //
+    if($this->dagboekcode)
+      $this->dagboektype = $GLOBALS['stam']->Get_field("type",$GLOBALS['stam']->dagboeken,"\"code\"='{$this->dagboekcode}'",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    // bepaal of de periode in een geconsolideerde periode valt
+    //
+    $this->geconsolideerd = $this->checkConsolidatie();
+
+  } // END FUNCTION getEmptyJournaalpost }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   checkConsolidatie() 
+  * @SYLLABUS: 
+  *   Controleert of een bepaalde periode is geconsolideerd (=BTW afsluiting
+  *   van de periode is gepleegd).
+  *
+  *****************************************************************{{{ */
+  function checkConsolidatie() {
+    return($GLOBALS['stam']->Get_field('COUNT(*)',$GLOBALS['stam']->btwaangiftes,'"boekjaar"='.$this->boekjaar.' AND "periode"='.$this->periode
+          ,$this->file."::".__FUNCTION__."::".__LINE__) ? true : false);
+  } // END FUNCTION checkConsolidatie }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   emptyBoekregel() 
+  * @SYLLABUS: 
+  *   EmptyBoekregel laadt een dummy object met lege boekregelwaarden
+  *   Dit wordt gebruikt in journaalform, nieuwe boekregel, dus alleen de daar
+  *   betreffende velden hoeven te worden gebruikt.
+  *
+  *****************************************************************{{{ */
+  function emptyBoekregel() {
+    $val = new Dummy();
+    $val->boekregelid = '';
+    $val->journaalid = '';
+    $val->boekdatum = ($this->boekdatum) ? $this->boekdatum : $this->datum; // default waarde
+    $val->periode = '';
+    $val->grootboekrekening = '';
+    $val->btwrelatie = '';
+    $val->grootboeknaam = '';
+    $val->relatie = '';
+    $val->nummer = '';
+    $val->boorsprong = '';
+    $val->dagboekcode = '';
+    $val->bomschrijving = ($this->bomschrijving) ? $this->bomschrijving : $this->jomschrijving; // default waarde
+    $val->bedrag = '';
+    $val->debet = '';
+    $val->credit = '';
+    return($val);
+
+  } // END FUNCTION emptyBoekregel }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   deletePost() 
+  * @SYLLABUS: 
+  *   Verwijder journaalpost en bijbehorende boekstukregels.
+  *   LET OP: de journaalpost en regels worden wel uit de db verwijderd maar
+  *   het post object bevat nog de gegevens. Als het post object ook moet
+  *   worden geschoond geef dan in de aanroepende code een postReload() in nadat post-> op '' is gezet.
+  *
+  *   Als een bankstuk wordt verwijderd, eerst checken of in dagboektmp niet al
+  *   weer een nieuwer bankstuk is ingegeven of in bewerking is in dat geval
+  *   niet toelaten.
+  *   Hetzelfde geldt voor kasboek
+  *   TODO Voor kas geldt het voorlopig nog niet omdat we kasboekingen
+  *        direct in het grootboek boeken en niet via een kasblad.
+  *   28-10-08
+  *   We gaan voor kas toch een kasblad maken maar niet met een begin en
+  *   eindsaldo dat op elkaar moet aansluiten en waarvoor een lock van het
+  *   dagboek nodig is zolang nog een 'open' journaalpost bestaat. Het saldo
+  *   van het kasblad wordt gewoon op de grootboekrekeing 'kas' geboekt bij het
+  *   afronden van het kasblad. In de methode deletePost verandert er dus
+  *   niets voor kas.
+  *****************************************************************{{{ */
+  function deletePost($journaalid=0,$journaalpost=0,$boekjaar='') {
+    global $msg, $stam;
+
+    // PREPROCESSING
+
+    if($boekjaar) $this->boekjaar = $boekjaar;
+
+    // Als nog geen journaalpost is geladen moeten we dat hier doen. Anders
+    // kennen we geen dagboektype.
+    //
+    if($journaalid || $journaalpost) $this->getJournaalpost($journaalid,$journaalpost,$processing=false,$loadboekregels=true);
+    elseif(!$this->journaalid && !$this->journaalpost) return(false);
+
+# printr($this,"journaal.class::deletePost\n"); die();
+
+    switch($this->dagboektype) {
+      
+      case 'kas-nogevenniet'   :
+        $max = $stam->Get_field('MAX("journaalid")',$stam->dagboekhistorie,"\"code\"='{$this->dagboekcode}'",$this->file."::".__FUNCTION__."::".__LINE__);
+        // als het hoogste journaalid in dagboekhistorie gelijk is aan het journaalid dan is er nog geen nieuwe kas
+        // journaalpost aangemaakt (wat feitelijk ook niet zou kunnen want gedurende de looptijd van het kasblad blijft
+        // dit gelockt staan). In dat geval kan deze journaalpost verwijderd worden en moet ook het record in 
+        // dagboekhistorie verwijderd worden NADAT de gegevens in dagboekhistorie zijn teruggezet in dagboek.code'kas' zodat de 
+        // oorspronkelijke situatie weer hersteld is.
+        if($max == $journaalid) { // valide, ga door met herstellen
+          $arr = $stam->Get_fields(array("code","saldo","vorigeboeknummer","huidigeboeknummer"),$stam->dagboekhistorie,"\"journaalid\"={$max}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+          // plaats de temp gegevens terug in dagboeken'$this->dagboekcode' en verwijder evt het slot
+          $stam->Do_query("UPDATE {$stam->dagboeken} "
+                         ."SET \"boeknummer\"={$arr['vorigeboeknummer']},\"saldo\"='{$arr['saldo']}',\"slot\"=0 "
+                         ."WHERE \"code\"='{$arr['code']}' AND \"boeknummer\"={$arr['huidigeboeknummer']}",$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['blue'][] = "Dagboek '{$arr['code']}': situatie kasblad [{$arr['vorigeboeknummer']}] hersteld.";
+        } // END IF max==journaalid
+        else { // kan niet herstellen, is al nieuw kasnummer gemaakt of in bewerking
+          $arr = $stam->Get_fields(array("vorigeboeknummer"),$stam->dagboekhistorie,"\"journaalid\"={$journaalid}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['red'][] = $stam->helpImg(RUBRIEK.'kandagboeknietherst','Kan dagboek niet meer herstellen')
+                         ."Kan dagboek '{$arr['code']}': kasblad [{$arr['vorigeboeknummer']}] niet meer herstellen.";
+          $arr = $stam->Get_fields(array("huidigeboeknummer"),$stam->dagboekhistorie,"\"journaalid\"={$max}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['red'][] = $stam->helpImg(RUBRIEK.'isalnwkasblad','Er is al nieuw Kasblad')
+                         ."Er is al een nieuw kasblad [{$arr['huidigeboeknummer']}], journaalnummer [{$max}] in bewerking.";
+          return(false);
+        } // END ELSE
+        break;
+
+      case 'bank'   :
+        $max = $stam->Get_field('MAX("journaalid")',$stam->dagboekhistorie,"\"code\"='{$this->dagboekcode}'",$this->file."::".__FUNCTION__."::".__LINE__);
+        // als het hoogste journaalid in dagboekhistorie gelijk is aan het journaalid dan is er nog geen nieuwe rabo
+        // journaalpost aangemaakt. In dat geval kan deze journaalpost verwijderd worden en moet ook het record in 
+        // dagboekhistorie verwijderd worden NADAT de gegevens in dagboekhistorie zijn teruggezet in dagboek.code'rabo' zodat de 
+        // oorspronkelijke situatie weer hersteld is. Ook moet een evt slot in dagboek verwijderd worden.
+        //
+        if($max == $this->journaalid) { // valide, ga door met herstellen
+          $arr = $stam->Get_fields(array("code","saldo","vorigeboeknummer","huidigeboeknummer"),$stam->dagboekhistorie,"\"journaalid\"={$max}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+          // plaats de temp gegevens terug in dagboeken'$this->dagboekcode' en verwijder evt het slot
+          $stam->Do_query("UPDATE {$stam->dagboeken} "
+                         ."SET \"boeknummer\"={$arr['vorigeboeknummer']},\"saldo\"='{$arr['saldo']}',\"slot\"=0 "
+                         ."WHERE \"code\"='{$arr['code']}' AND \"boeknummer\"={$arr['huidigeboeknummer']}",$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['blue'][] = "Dagboek '{$arr['code']}': situatie bankboeknummer [{$arr['vorigeboeknummer']}] hersteld.";
+          // het dagboekhistorie record moet nu verwijderd worden omdat we daar met het aanmaken van een nieuw boekstuk weer tegenaan lopen
+          if($stam->Delete_record($stam->dagboekhistorie, "\"journaalid\"={$max}",$this->file."::".__FUNCTION__."::".__LINE__))
+            $msg['blue'][] = "Verwijderd: historieregel bankboeknummer [{$arr['huidigeboeknummer']}], journaalid: {$max}";
+        } // END IF max==journaalid
+        else { // kan niet herstellen, is al nieuw banknummer gemaakt of in bewerking
+          $vorigeboeknummer = $stam->Get_field('"vorigeboeknummer"',$stam->dagboekhistorie,"\"journaalid\"={$this->journaalid}",$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['red'][] = $stam->helpImg(RUBRIEK.'kanbnkboeknietherst','Kan bankboeknummer niet meer herstellen')
+                         ."Kan dagboek '{$this->dagboekcode}': bankboeknummer [{$vorigeboeknummer}] niet meer herstellen.";
+          $huidigeboeknummer = $stam->Get_field('"huidigeboeknummer"',$stam->dagboekhistorie,"\"journaalid\"={$max}",$this->file."::".__FUNCTION__."::".__LINE__);
+          $msg['red'][] = $stam->helpImg(RUBRIEK.'isalnwbankblad','Er is al nieuw Bankboeknummer')
+                         ."Er is al een nieuw bankboeknummer [{$huidigeboeknummer}], journaalnummer [{$max}] in bewerking.";
+          return(false);
+        } // END ELSE
+        break;
+
+      case 'inkoop'  :
+        // als we de inkoopjournaalpost verwijderen, dan moet ook de bijbehorende factuur uit inkoopfacturen
+        // worden verwijderd.
+        // vraag eerst nog even de inkoopfactuurgegevens op om in de msg string te kunnen tonen
+        $arr = $stam->Get_fields(array("factuurnummer","factuurbedrag"),$stam->inkoopfacturen,"\"journaalid\"={$this->journaalid}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+        if($stam->Delete_record($stam->inkoopfacturen,"\"journaalid\"={$this->journaalid}"))
+          $msg['blue'][] = "Verwijderd: inkoopfactuur: {$arr['factuurnummer']}, journaalpost:{$this->journaalpost} rec.id:{$this->journaalid} and boekjaar={$this->boekjaar}";
+        break;
+      
+      case 'verkoop'  :
+        // als we de verkoopjournaalpost verwijderen, dan moet ook de bijbehorende factuur uit verkoopfacturen
+        // worden verwijderd.
+        // vraag eerst nog even de verkoopfactuurgegevens op om in de msg string te kunnen tonen
+        $arr = $stam->Get_fields(array("factuurnummer","factuurbedrag"),$stam->verkoopfacturen,"\"journaalid\"={$this->journaalid}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+        if($stam->Delete_record($stam->verkoopfacturen,"\"journaalid\"={$this->journaalid}"))
+          $msg['blue'][] = "Verwijderd: verkoopfactuur: {$arr['factuurnummer']}, journaalpost:{$this->journaalpost} rec.id:{$this->journaalid} and boekjaar={$this->boekjaar}";
+        break;
+      
+      case 'pin'  :
+        // als we de pinjournaalpost verwijderen, dan moet ook de bijbehorende bon uit pinbetalingen
+        // worden verwijderd.
+        // vraag eerst nog even de bongegevens op om in de msg string te kunnen tonen
+        $arr = $stam->Get_fields(array("factuurnummer","factuurbedrag"),$stam->pinbetalingen,"\"journaalid\"={$this->journaalid}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+        if($stam->Delete_record($stam->pinbetalingen,"\"journaalid\"={$this->journaalid}"))
+          $msg['blue'][] = "Verwijderd: pinbetaling: {$arr['factuurnummer']}, {$arr['bedrag']}, journaalpost:{$this->journaalpost} rec.id:{$this->journaalid} and boekjaar={$this->boekjaar}";
+        break;
+      
+    } // END SWITCH this->dagboektype
+
+    // MAIN PROCESSING
+
+    // alvorens de boekregels kunnen worden verwijderd moeten de geconsolideerde grootboeksaldi van de 
+    // betreffende grootboekrekeningen weer worden teruggezet.
+    // Dit moet langs de koninklijke weg van Delete_line. Ten eerste worden daar de grootboeksaldi juistgezet
+    // en ten tweede wordt elke verwijderde boekregel verplaatst naar boekregelsTrash. Ten derde wordt van
+    // elke verwijdering een msg['blue' gegenereerd en we mogen best tonen wat het gevolg is van verwijderen van
+    // een journaalpost (is tenslotte een uitzonderingsgeval)
+    //
+    if($arr = $stam->Get_array_field("boekregelid", $stam->boekregelstbl, "\"journaalid\"={$this->journaalid}",$this->file."::".__FUNCTION__."::".__LINE__)) {
+      foreach($arr AS $val) {
+        if(!$this->Delete_line($val)) {
+          $msg['red'][] = "Fout[55] Kan boekregel[{$val}] niet verwijderen";
+          return(false);
+        }
+      }
+    }
+
+    // verwijder nu de journaalpost
+    //  
+    if($journaalid) 
+      $where = "\"journaalid\"={$journaalid}";
+    else if($journaalpost) 
+      $where = "\"journaalpost\"={$journaalpost} AND \"boekjaar\"={$this->boekjaar}";
+    else {
+      $msg['red'][] = "Fout[56] Kan journaalpost[{$journaalid}] niet verwijderen";
+      return(false);
+    }
+
+    if($stam->Delete_record($stam->journaal, $where)) {
+      $msg['blue'][] = (!$journaalpost) ?
+        "Verwijderd: Journaalpost, journaalid:{$journaalid}" :
+        "Verwijderd: Journaalpost:{$journaalpost}/journaalid:{$journaalid}";
+      return(true);
+    }
+    else {
+      $msg['red'][] = "Fout[57] Kan journaalid[{$journaalid}] niet verwijderen";
+      return(false);
+    }
+    
+  } // END FUNCTION deletePost }}}
+  
+
+  /* ****************************************************************
+  * @METHOD:   grootboekSaldoBijwerken() 
+  * @SYLLABUS: 
+  *   Geconsolideerd grootboeksaldo.
+  *   Het zouist geboekte bedrag wordt naar het geconsolideerde saldo van de
+  *   grootboekrekening geboekt zodat we dit saldo on the flight bijhouden ipv
+  *   het steeds weer moeten herleiden als we het opvragen.
+  *
+  *   lET OP: vanaf 2009 wordt het grootboeksaldo in een aparte tabel per
+  *   rekening maar vooral per boekjaar bijgehouden. Dit om ervoor te zorgen
+  *   dat we in verschillende boekjaren kunnen boeken en een historie bewaren.
+  *
+  * TODO
+  * Dit moet ook omgebouwd worden naar gebruik van views, zie:
+  *   _grootboek.class::aanmakenSaldi
+  *
+  *****************************************************************{{{ */
+  function grootboekSaldoBijwerken($grootboekrekening,$bedrag) {
+    global $stam;
+    // Is er al een grootboeksaldi record voor dit nummer in dit boekjaar?
+    //
+    $saldo = $stam->Get_field("saldo", $stam->grootboeksaldi, "\"nummer\"={$grootboekrekening} AND \"boekjaar\"={$this->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__);
+    printrc2($saldo, "dit is het opgevraagde saldo in grootboekSaldoBijwerken: ");
+    // check saldo op false want het kan ook 0 zijn
+    if($saldo !== false) { 
+    printrc2($saldo, "dit is het saldo in grootboekSaldoBijwerken indien er salod is gevonden: ");
+      $saldo += $bedrag;
+      if($saldo == 0 && preg_match("/^-/", $saldo)) $saldo = '0.00';
+      return($stam->Do_query("UPDATE {$stam->grootboeksaldi} SET \"saldo\"={$saldo} WHERE \"nummer\"={$grootboekrekening} AND \"boekjaar\"={$this->boekjaar}"
+                         ,$this->file."::".__FUNCTION__."::".__LINE__)) ? true : false;
+    }
+    else { // er is nog geen record
+    printrc2($saldo, "dit is de waarde van grootboekSaldoBijwerken indien er geen opgevraagd saldo is gevonden: ");
+      $saldo = 0;
+      $saldo += $bedrag;
+      if($saldo == 0 && preg_match("/^-/", $saldo)) $saldo = '0.00';
+      $newid = $stam->newId($stam->grootboeksaldi);
+      return($stam->Do_query("INSERT INTO {$stam->grootboeksaldi} (\"id\",\"nummer\",\"boekjaar\",\"saldo\") VALUES "
+                        ."({$newid},{$grootboekrekening},{$this->boekjaar},{$saldo})"
+                         ,$this->file."::".__FUNCTION__."::".__LINE__)) ? true : false;
+    }
+
+  } // END FUNCTION grootboekSaldoBijwerken }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   factuurSaldoBijwerken() 
+  * @SYLLABUS: 
+  *   'voldaan' saldo van inkoop/verkoopfacturen.
+  *   Afhankelijk van het grootboekrekeningnummer wordt bepaald of het een
+  *   inkoop of verkoopfactuur betreft.
+  *   rkg_debiteuren = verkoopfacturen
+  *   rkg_crediteuren = inkoopfacturen
+  *   Los van debiteuren/crediteuren zal het bedrag dat naar 'voldaan' wordt
+  *   geboekt er debet naar toe worden geboekt. 'voldaan' en 'factuurbedrag'
+  *   laten altijd een debetindicatie van het factuurbedrag c.q. betaling zien.
+  *   Betaaldatum: omdat we hier toch al de factuurregel met het saldo
+  *   bijwerken kunnen we ook de betaaldatum van dat saldo hier updaten. Dat
+  *   hebben we hier nog in het object staan.
+  *
+  *****************************************************************{{{ */
+  function factuurSaldoBijwerken($grootboekrekening,$bedrag,$id,$betaaldatum=0) {
+    global $msg, $stam;
+
+    switch($grootboekrekening) {
+      case $stam->rkg_debiteuren['value']    : $tabel = $stam->verkoopfacturen; $bedrag *= -1; break;
+      case $stam->rkg_crediteuren['value']   : $tabel = $stam->inkoopfacturen;  break;
+      case $stam->rkg_pinbetalingen['value'] : $tabel = $stam->pinbetalingen;   break;
+    }
+
+    $saldo = $stam->Get_fields(array("voldaan","factuurbedrag"), $tabel, "\"id\"={$id}",ASSOC,$this->file."::".__FUNCTION__."::".__LINE__);
+
+#printrc1($saldo['voldaan'], "saldo-voldaan: ");
+#printrc1($saldo['factuurbedrag'], "saldo-factuurbedrag: ");
+#printrc1($bedrag, "bedrag: ");
+
+// Bij verkooprekeningen wordt het bedrag - aangeleverd en is hierboven naar + gezet.
+    $saldo['voldaan'] += $bedrag;
+
+    if($saldo['voldaan'] == 0 && preg_match("/^-/", $saldo['voldaan'])) $saldo['voldaan'] = '0.00';
+    // er moet iso datum worden aangeboden, norm2iso bepaalt zelf of het een valide datum is of moet worden omgezet
+    $betaaldatum = $GLOBALS['timer']->norm2iso($betaaldatum);
+    if($stam->Do_query("UPDATE {$tabel} SET \"voldaan\"='{$saldo['voldaan']}',\"betaaldatum\"='{$betaaldatum}' WHERE \"id\"={$id}",$this->file."::".__FUNCTION__."::".__LINE__)) {
+      // factuurnummer even ophalen voor de msg
+      $factuurnummer = $stam->Get_field("factuurnummer", $tabel, "\"id\"={$id}",$this->file."::".__FUNCTION__."::".__LINE__);
+      $msg['blue'][] = ($grootboekrekening == $stam->rkg_pinbetalingen['value']) ?
+        "Saldo van bonnr: [{$factuurnummer}] bijgewerkt; nieuw saldo: ".formatbedrag($saldo['voldaan'],$null=true) :
+        "Voldaansaldo van factuur [{$factuurnummer}] bijgewerkt; nieuw saldo: ".formatbedrag($saldo['voldaan'],$null=true)." van: ".formatbedrag($saldo['factuurbedrag'],$null=true) ;
+      return($saldo['voldaan']);
+    }
+    else
+      return(false);
+
+  } // END FUNCTION factuurSaldoBijwerken }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   opslaanLine() 
+  * @SYLLABUS: 
+  *   Opslaan boekregel edit/savenew
+  *
+  *****************************************************************{{{ */
+  function opslaanLine(&$p) {
+    global $msg, $stam;
+
+    printrc1($p,"p: _journaal.class::opslaanLine\n");
+
+    // We hoeven ons hier niet meer te bekommeren om debet of credit bedragen, 
+    // immers het te boeken bedrag wordt in de juiste polariteit (_post_preprocessing.inc)
+    // aangeboden in $p->boekregelbedrag en evt. $p->btwboekregelbedrag.
+
+    //$bomschrijving = $stam->Prepare($p->bomschrijving);
+    $bomschrijving = $p->bomschrijving;
+
+    // zet de datum naar iso
+    $datum = $GLOBALS['timer']->norm2iso($p->boekdatum);
+
+    // het grootboekrekening locaal maken, kunnen dadelijk nog veranderen
+    $grootboekrekening = $p->grootboekrekening;
+
+    // als aktie == savelinefinale dan moet het resterende saldo op de, default bij het dagboekcode horende
+    // grootboekrekening worden geboekt. Bij deze aktie wordt geen grootboeknummer en bedrag meegeleverd.
+    // Deze moeten uit het $post object komen
+    //
+    // ALS echter geen savelinefinale dan moet er een grootboeknummer zijn
+    // meegeleverd. Is dat niet het geval dan onmiddelijk stoppen! Dit kan b.v.
+    // gebeuren als men bij een reguliere boeking vergeet een rekeningnummer in
+    // te vullen. JS checkt dat niet want er zijn situaties waarin het mogelijk
+    // is om zonder ingevuld rekeningnummer door te gaan (savelinefinal b.v.)
+    //
+    if($p->aktie != 'savelinefinale') {
+      if(! $grootboekrekening) { // FOUTsituatie, stoppen
+        $msg['red'][] = 'Er is geen grootboekrekening in de boekregel ingegeven!';
+        return(false);
+      }
+    }
+    elseif($p->aktie == 'savelinefinale') {
+      $datum = ($datum) ? $datum : $this->datum;
+      $p->boekregelbedrag = $this->saldo * -1;
+      $grootboekrekening = $this->dagboekgrootboekrekening;
+      $bomschrijving = ($bomschrijving) ? $bomschrijving : $this->jomschrijving;
+      $p->factuurnummer = $this->jnummer;
+      $p->boorsprong = $this->boorsprong;
+    }
+
+    $lastid = false;
+
+    // een nieuwe boekingsregel wordt gekenmerkt door GEEN boekregelid
+    // Sla deze regel nieuw op
+    if(empty($p->boekregelid)) {
+      $insert = new Dummy();
+      $insert->journaalid        = $this->journaalid;
+      $insert->boekjaar          = $this->boekjaar;
+      $insert->boekdatum         = $datum;
+      $insert->grootboekrekening = $grootboekrekening;
+      $insert->factuurrelatie    = $p->factuurid;
+      $insert->relatie           = $p->relatiecode;
+      $insert->nummer            = $p->factuurnummer;
+      $insert->boorsprong        = $p->boorsprong;
+      $insert->bomschrijving     = $bomschrijving;
+      $insert->bedrag            = $p->boekregelbedrag;
+
+      if($lastid = $this->Do_insert_line($insert))
+        $msg['blue'][] = "Toegevoegd: ({$lastid}) - {$p->grootboekrekening} {$p->bomschrijving} ".formatbedrag($p->boekregelbedrag);
+      else 
+        return(false);
+
+      // FACTUREN
+      // Indien hier een p->factuurid zichtbaar is, dan zijn de gegevens van de boeking afkomstig van een inkoop/verkoopfactuur
+      // We moeten hier dan ook het saldo van die betreffende factuur updaten door 'voldaan' te verhogen met het bedrag van
+      // de betaling/ontvangst. Meestal zal dat het hele bedrag zijn waarna de factuur is 'betaald' maar het kan voorkomen dat 
+      // er deelbetalingen op te vinden zijn 
+      if($p->factuurid) {
+        // de datum moet iso datum zijn; wordt in de bijwerk functie omgezet.
+        if($nieuwbedrag = $this->factuurSaldoBijwerken($grootboekrekening,$p->boekregelbedrag,$p->factuurid,$p->boekdatum) === false)
+          return(false);
+      } // END IF p->factuurid
+          
+      // BTW
+      // indien een btwbboekregelbedrag is meegegeven moet dit geboekt worden op een btw rekening
+      // die rekening hangt af van het grootboeknummer. Aan de grootboeknummers is via een string-veld een default
+      // btw rekening gekoppeld. Dit label 'btwdefault' is een verwijzing naar 'btwkey', dat ook aan een grootboek-
+      // rekening is gekoppeld. B.v. een inkooprekening nr. 4400 heeft een btwdefault-label: 'rkg_btwinkopen'. Dit
+      // label komt overeen met de 'btwkey' van rekening 2200: 'Te ontvangen BTW'. Het btw bedrag dat met de boekregel
+      // is meegegeven wordt dus geboekt op 2200.
+      if(isset($p->btwboekregelbedrag) && $p->btwboekregelbedrag <> 0) {
+        // bepaal adhv het grootboeknummer wat en of het default btw rekeningnummer is
+        if($btwnummer = self::btwNummer($grootboekrekening)) { // als er een btwnummer gevonden is
+          $btwinsert = new Dummy();
+          $btwinsert->journaalid        = $this->journaalid;
+          $btwinsert->boekjaar          = $this->boekjaar;
+          $btwinsert->boekdatum            = $datum;
+          $btwinsert->grootboekrekening = $btwnummer;
+          $btwinsert->relatie           = $p->relatiecode;
+          $btwinsert->nummer            = $p->factuurnummer;
+          $btwinsert->boorsprong        = $p->boorsprong;
+          $btwinsert->bomschrijving     = $bomschrijving;
+          $btwinsert->bedrag            = $p->btwboekregelbedrag;
+
+          if($btwlastid = $this->Do_insert_line($btwinsert)) {
+            $msg['blue'][] = "Toegevoegd BTWboeking: ({$btwlastid}) - {$btwnummer} {$p->bomschrijving} ".formatbedrag($p->btwboekregelbedrag);
+            // plaats dit boekregelid in het veld 'boekregels.btwrelatie'
+            $stam->Do_query("UPDATE {$stam->boekregelstbl} SET \"btwrelatie\"={$btwlastid} WHERE \"boekregelid\"={$lastid}",$this->file."::".__FUNCTION__."::".__LINE__);
+          }
+          else 
+            return(false);
+
+        }
+      } // END IF btwboekregelbedrag
+
+    }
+    else { // UPDATE
+
+      // maak een afschrift van originele boekregel en geef het nieuwe boekregelbedrag mee
+      // zodat in Do_update_line kan worden bepaald of het grootboeksaldo met worden aangepast.
+      // Hetzelfde geldt voor het grootboekrekeningnummer. Als dit veranderd is moet iets met 
+      // het saldo van het oude en het nieuwe gebeuren
+      $kopie = $this->boekregelDuplicate($this->boekregel[$p->boekregelid], $p->boekregelbedrag, $p->grootboekrekening);
+
+      // verander nu de values in kopie. Op dit moment hebben we al een kopie->oudbedrag waarin het 
+      // originele bedrag is veiliggesteld dus we hoeven ons geen zorgen te maken over bedrag.
+      // Uiteraard mag het boekregelid niet worden veranderd; dit is de key voor de update.
+/* 
+voorbeeld van een kopie object:
+
+stdClass Object
+(
+    [journaalid] => 22
+    [boekregelid] => 160
+    [boekdatum] => 2006-02-18
+    [periode] => 1
+    [grootboekrekening] => 8010
+    [btwrelatie] => 161
+    [grootboeknaam] => Verkopen
+    [relatie] => 
+    [nummer] => 2236f
+    [boorsprong] => rabo 11
+    [dagboekcode] => rabo
+    [jomschrijving] => Bankafschrift: 11
+    [bomschrijving] => Verkoop plaatmaterialen
+    [bedrag] => -130
+    [oudbedrag] => -128.00
+    [bedragveranderd] => 1
+    [oudgrootboekrekening] => 8010
+*/
+
+      $kopie->boekdatum = $datum;
+      $kopie->grootboekrekening = $p->grootboekrekening;
+      $kopie->relatie = $p->relatiecode;
+      $kopie->factuurrelatie = $p->factuurid;
+      $kopie->nummer = $p->factuurnummer;
+      $kopie->boorsprong = $p->boorsprong;
+      $kopie->bomschrijving = $bomschrijving;
+      $kopie->bedrag = $p->boekregelbedrag;
+      
+      if($this->Do_update_line($kopie))
+        $msg['blue'][] = "De gegevens van boekregel: {$p->boekregelid} zijn aangepast.";
+
+      $p->boekregel = '';
+
+      // BTW update
+      // heeft de boekregel een btwrelatie?
+      if($kopie->btwrelatie) {
+
+        // is de status van de hoofdboekregel wellicht veranderd in GEENBTW. Dan de btwboekregel verwijderen
+        if($p->btw == GEENBTW) {
+          $this->Delete_line($kopie->btwrelatie,'btw');
+          return(true);
+        }
+
+        // update van de relevante velden van de bij de hoofdboekregel behorende btwboekregel (opgeslagen in boekregels.btwrelatie)
+
+        // Maak eerst weer een kopie van het boekregels object van btwrelatie. Geen nieuwgrootboeknummer want dat kan bij 
+        // een btw boeking niet veranderen.
+        // In sommige gevallen kan het voorkomen dat de boekregel met
+        // btwrelatie niet meer bestaat, b.v. als die boekregel apart van de
+        // parent-boekregel is gewist. Ondervang dat met een foutboodschap.
+        if(!isset($this->boekregel[$kopie->btwrelatie])) {
+          $msg['red'][] = $stam->helpImg(RUBRIEK.'.btwrelatiemist','BTW boekregel is er niet') 
+                         ."De BTW boekregel: {$kopie->btwrelatie} van boekregel: {$kopie->boekregelid} is al verwijderd!";
+          return(false);
+        }
+        printrc1($kopie, "kopie: ".__LINE__);
+        $btwkopie = $this->boekregelDuplicate($this->boekregel[$kopie->btwrelatie], $p->btwboekregelbedrag);
+
+        $btwkopie->boekdatum = $datum;
+        $btwkopie->relatie = $p->relatiecode;
+        $btwkopie->nummer = $p->factuurnummer;
+        $btwkopie->boorsprong = $p->boorsprong;
+        $btwkopie->bomschrijving = $bomschrijving;
+
+        // voer de btw update uit en bepaal de messages indien succes
+        if($this->Do_update_line($btwkopie)) {
+
+          // als het hoofdbedrag is veranderd en het btwboekregelbedrag niet (is leeg of onveranderd doorgegeven), geef msg
+          if($kopie->bedragveranderd && !$btwkopie->bedragveranderd) {
+              $msg['red'][] = $stam->helpImg(RUBRIEK.'btwbedraangepast','BTW bedrag van boekregel aangepast') 
+                             ."De gegevens van BTW boekregel: {$btwkopie->boekregelid} zijn aangepast. HET BEDRAG NIET!";
+          }
+          else if(!$kopie->bedragveranderd && !$btwkopie->bedragveranderd) {
+            $msg['blue'][] = "De gegevens van BTW boekregel: {$btwkopie->boekregelid} zijn ook aangepast.";
+          }
+          else if(!$kopie->bedragveranderd && $btwkopie->bedragveranderd) {
+            $msg['red'][] = $stam->helpImg(RUBRIEK.'btwbedrveranderd','BTW bedrag van boekregel veranderd') 
+                           ."Het BTW bedrag van BTW boekregel: {$btwkopie->boekregelid} is veranderd. HET HOOFDBEDRAG van boekregel: {$kopie->boekregelid} NIET!";
+          }
+          else {
+            $msg['blue'][] = "De gegevens en het bedrag van BTW boekregel: {$btwkopie->boekregelid} zijn ook aangepast.";
+          }
+        } // END IF Do_update_line
+        else { // Do_update_line niet gelukt
+            $msg['red'][] = $stam->helpImg(RUBRIEK.'updbtwboekrmislukt','Update BTW boekregel niet gelukt')
+                           ."Update van BTW boekregel: {$btwkopie->boekregelid} IS NIET GELUKT!";
+        }
+
+      } // END IF BTW update
+      
+      // Nog geen btwrelatie maar hier wel een btwboekregelbedrag meegeleverd
+      // maak dan een nieuwe btw boekregelboeking
+      else if(isset($p->btwboekregelbedrag) && $p->btwboekregelbedrag <> 0) {
+        // bepaal adhv het grootboeknummer wat het standaard btw rekeningnummer is
+        if($btwnummer = self::btwNummer($grootboekrekening)) { // als er een btwnummer gevonden is
+          $btwinsert = new Dummy();
+          $btwinsert->journaalid        = $p->journaalid;
+          $btwinsert->boekjaar          = $this->boekjaar;
+          $btwinsert->boekdatum            = $datum;
+          $btwinsert->grootboekrekening = $btwnummer;
+          $btwinsert->relatie           = $p->relatiecode;
+          $btwinsert->nummer            = $p->factuurnummer;
+          $btwinsert->boorsprong        = $p->boorsprong;
+          $btwinsert->bomschrijving     = $bomschrijving;
+          $btwinsert->bedrag            = $p->btwboekregelbedrag;
+
+          if($btwlastid = $this->Do_insert_line($btwinsert)) {
+            $msg['blue'][] = "Toegevoegd BTWboeking: ({$btwlastid}) - {$btwnummer} {$p->bomschrijving} ".formatbedrag($p->btwboekregelbedrag);
+            // plaats dit boekregelid in het veld 'boekregels.btwrelatie' van de hoofdboekregel
+            $stam->Do_query("UPDATE {$stam->boekregelstbl} SET \"btwrelatie\"={$btwlastid} WHERE \"boekregelid\"={$kopie->boekregelid}",$this->file."::".__FUNCTION__."::".__LINE__);
+          }
+          else 
+            return(false);
+        }
+      } // END ELSE IF btwinsert op een update van hoofdboekregel
+
+    } // END ELSE update
+
+  } // END FUNCTION opslaanLine()  }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   btwNummer( int $grootboeknummer) 
+  * @SYLLABUS: 
+  *   Bepaalt een grootboekrekening-nummer dat hoort bij het default BTW type
+  *   van een grootboekrekening
+  *
+  *****************************************************************{{{ */
+  function btwNummer($grootboeknummer) {
+    global $stam;
+
+    $query =<<<EOT
+SELECT DISTINCT 
+  CASE WHEN g.btwdefault = '' THEN NULL ELSE
+    CASE WHEN b.nummer > {$stam->omslag['value']} THEN NULL ELSE b.nummer END
+  END AS btwnummer
+FROM {$stam->grootboekstam} AS g
+JOIN {$stam->grootboekstam} AS b
+ON g.btwdefault=b.btwkey
+WHERE g.nummer={$grootboeknummer}
+EOT;
+    $btwobj = $stam->Get_object($query, $this->file."::".__FUNCTION__."::".__LINE__);
+    return ( ($btwobj) ? $btwobj->btwnummer : false );
+
+  } // END FUNCTION btwNummer }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   Do_insert_line() 
+  * @SYLLABUS: 
+  *   Insert een boekstukregel met kant en klaar aangeleverde gegevens in een
+  *   $obj object dat een dummy boekregel object is waarin de juiste gegevens
+  *   zijn ingevuld.
+  *   Maak hier een aparte functie van omdat er meer dingen moeten gebeuren
+  *   tijdens een insert en we zo een eenduidige methode hebben.
+  *   1. Vraag een nieuw id op (MAX(id)) voor de nieuwe de boekregel. Gebruik
+  *      geen autonum omdat we wel eens boekregels willen wissen en we dan geen
+  *      aansluitende boekregels meer krijgen.
+  *   2. Insert de gegeven
+  *   3. Pas het grootboeksaldo van de grootboekrekening van die boekregel aan
+  *   Lever de info in de vorm van een $this->boekregel[0]->object:
+  *   Denk erom dat tenminste de grootboekrekening en bedrag goed zijn ingevuld
+  *   omdat dit saldo wordt aangepast.
+
+            [0] => stdClass Object
+                (
+                    [journaalid] => 11
+                    [boekregelid] => 101
+                    [boekdatum] => 2006-02-13
+                    [periode] => 1
+                    [grootboekrekening] => 4250
+                    [btwrelatie] => 0
+                    [grootboeknaam] => Portikosten
+                    [relatie] => 
+                    [nummer] => 
+                    [boorsprong] => 
+                    [dagboekcode] => kas
+                    [jomschrijving] => Kasblad 2
+                    [bomschrijving] => Postzegels
+                    [bedrag] => 12.95
+                    [oudbedrag] => 11.95  // deze is extra toegevoegd bovenop het standaard boekregels object
+
+  *
+  *****************************************************************{{{ */
+  function Do_insert_line($obj) {
+    if(!$obj) return(false);
+    global $stam;
+
+    // stel de insert vraag samen
+    // betrek alleen values bij de vraag die zijn ingevuld. 
+
+    $fields = '"boekregelid"';
+    $values = $lastid = $stam->newId($stam->boekregelstbl);
+
+    foreach(get_object_vars($obj) AS $key=>$val) { 
+      switch($key) {
+        case 'journaalid'        : if($val != '') { $fields .= ',"journaalid"';        $values .=",{$val}"; } break;
+        case 'boekjaar'          : if($val != '') { $fields .= ',"boekjaar"';          $values .=",{$val}"; } break;
+        case 'boekdatum'         : if($val != '') { $fields .= ',"datum"';             $values .=",'{$val}'"; } break;
+        case 'grootboekrekening' : if($val != '') { $fields .= ',"grootboekrekening"'; $values .=",{$val}"; } break;
+        case 'factuurrelatie'    : if($val != '') { $fields .= ',"factuurrelatie"';    $values .=",{$val}"; } break;
+        case 'relatie'           : if($val != '') { $fields .= ',"relatie"';           $values .=",'{$val}'"; } break;
+        case 'nummer'            : if($val != '') { $fields .= ',"nummer"';            $values .=",'{$val}'"; } break;
+        case 'boorsprong'        : if($val != '') { $fields .= ',"oorsprong"';         $values .=",'{$val}'"; } break;
+        case 'bomschrijving'     : if($val != '') { $fields .= ',"bomschrijving"';     $values .=",'{$stam->Prepare($val)}'"; } break;
+        case 'bedrag'            : if($val != '') { $fields .= ',"bedrag"';            $values .=",{$val}"; } break;
+      }
+    }
+
+    $stam->query = "INSERT INTO {$stam->boekregelstbl} ({$fields}) VALUES ({$values}) ";
+    if(! $stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__)) {
+      return(false);
+    }
+
+    // er moeten tav de saldi geen controles gebeuren. Gewoon saldo boeken op de grootboekrekening
+    return($this->grootboekSaldoBijwerken($obj->grootboekrekening,$obj->bedrag )) ? $lastid : false;
+
+  } // END FUNCTION Do_insert_line }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   Do_update_line() 
+  * @SYLLABUS: 
+  *   Update een boekstukregel met kant en klaar aangeleverde gegevens.
+  *   Maak hier een aparte functie van omdat er meer dingen moeten gebeuren
+  *   tijdens een update en we zo een eenduidige methode hebben.
+  *   1. Update de boekregel
+  *   2. Pas het grootboeksaldo van de grootboekrekening van die boekregel aan
+  *   Lever de info in de vorm van een $this->boekregel[0]->object:
+  *   Denk erom dat tenminste de grootboekrekening goed is ingevuld omdat dit
+  *   saldo wordt aangepast.
+  *   Er moet ook een oud bedrag worden meegegeven omdat tijdens een update dit
+  *   oude bedrag moet worden afgetrokken
+  *   Als het bedrag niet is veranderd moet er niets mee gebeuren anders wordt
+  *   het grootboekrekening maar steeds gesaldeerd.
+  *
+  *****************************************************************{{{ */
+  function Do_update_line($obj) {
+    if(!$obj) return(false);
+    global $stam;
+
+    // stel de update vraag samen
+    // betrek alleen values bij de vraag die zijn ingevuld. dit betekent weliswaar dat
+    // we nooit string values kunnen verwijderen (die zijn immers leeg) maar dat willen we ook
+    // niet. Nummervalues kunnen we altijd nog op 0 zetten.
+
+    $str = '';
+
+    foreach(get_object_vars($obj) AS $key=>$val) { 
+      switch($key) {
+        case 'boekdatum'         : $val != '' and $str .= ",\"datum\"='{$val}'"; break;
+        case 'grootboekrekening' : $val != '' and $str .= ",\"grootboekrekening\"={$val}"; break;
+        case 'btwrelatie'        : $val != '' and $str .= ",\"btwrelatie\"={$val}"; break;
+        case 'factuurrelatie'    : $val != '' and $str .= ",\"factuurrelatie\"='{$val}'"; break;
+        case 'relatie'           : $val != '' and $str .= ",\"relatie\"='{$val}'"; break;
+        case 'nummer'            : $val != '' and $str .= ",\"nummer\"='{$val}'"; break;
+        case 'boorsprong'        : $val != '' and $str .= ",\"oorsprong\"='{$val}'"; break;
+        case 'bomschrijving'     : $val != '' and $str .= ",\"bomschrijving\"='{$stam->Prepare($val)}'"; break;
+        case 'bedrag'            : $val != '' and $str .= ",\"bedrag\"='{$val}'"; break;
+      }
+    }
+    $str = substr($str,1);
+
+    // er moeten tav de saldi veel controles gebeuren.
+    // - als het bedrag is veranderd moet het oude bedrag tegen en het nieuwe bedrag worden gesaldeerd, dus
+    //   alleen saldo boeken bij veranderd bedrag.
+    // - als het grootboekrekeningnummer is veranderd moet het oude bedrag op het oude grootboeksaldo
+    //   worden afgeboekt en het nieuwe bedrag op het nieuwe grootboeksaldo bijgeboekt, dus altijd saldo
+    //   boeken bij veranderd grootboeknummer.
+#printrc1($obj);
+/*
+voorbeeld van een object
+stdClass Object
+(
+    [journaalid] => 22
+    [boekregelid] => 160
+    [boekdatum] => 2006-02-18
+    [periode] => 1
+    [grootboekrekening] => 8010
+    [btwrelatie] => 161
+    [grootboeknaam] => Rente opbrengsten
+    [relatie] => 
+    [nummer] => 2236i
+    [boorsprong] => rabo 11
+    [dagboekcode] => rabo
+    [jomschrijving] => Bankafschrift: 11
+    [bomschrijving] => Verkoop plaatmaterialen
+    [bedrag] => -130
+    [oudbedrag] => -130.00
+    [oudgrootboekrekening] => 8410
+)
+*/
+    // is het grootboeknummer veranderd?
+    if($obj->grootboekrekening <> $obj->oudgrootboekrekening) { 
+      // veranderd, oude saldo naar de oude rekening
+      // nieuwe saldo naar nieuwe rekening
+      // Met deze transactie dekken we tevens een evt. veranderd bedrag af
+      if($this->grootboekSaldoBijwerken($obj->oudgrootboekrekening,$obj->oudbedrag * -1)) {
+        // als saldo bijwerken op de oude rekening is gelukt, doorgaan saldo bijwerken nieuwe rekening, anders false
+        if(! $this->grootboekSaldoBijwerken($obj->grootboekrekening,$obj->bedrag )) {
+          // als saldo bijwerken op de nieuwe rekening is gelukt, doorgaan met update, anders false
+          // TODO het gevaar is hier dat indien saldo bijwerken van 1 van de 2 boekingen niet lukt
+          //      er een return false volgt en er dus foute saldi zijn gerealiseerd.
+          return(false);
+        }
+      }
+      else {
+        return(false);
+      }
+    }
+    // is het bedrag veranderd?
+    else if($obj->bedrag <> $obj->oudbedrag) { 
+      // nieuwe saldo naar nieuwe rekening
+      // Eens kijken of we niet in 1 keer het verschil kunnen boeken.
+      $delta = (float)$obj->bedrag - (float)$obj->oudbedrag;
+      if(!$this->grootboekSaldoBijwerken($obj->grootboekrekening,$delta )) return(false);
+    }
+
+    // doe de feitelijke update
+    return(! $stam->Do_query("UPDATE {$stam->boekregelstbl} SET {$str} WHERE \"boekregelid\"={$obj->boekregelid} and \"boekjaar\"={$this->boekjaar}"
+                         ,$this->file."::".__FUNCTION__."::".__LINE__)) ? false : true;
+
+  } // END FUNCTION Do_update_line }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   Delete_line() 
+  * @SYLLABUS: 
+  *   Verwijder boekregel.
+  *   Als de regel een btwrelatie kent, verwijder dan ook de regel van de
+  *   btwrelatie.
+  *   Controleer of de regel in een andere regel een btwrelatie is en nul dan
+  *   die btwrelatie.
+  *   Als de regel een factuurrelatie kent, pas dan het 'voldaan' saldo van de
+  *   oorspronkelijke factuur aan.
+  *   Het feitelijk verwijderen en bijwerken van de saldi zouden we normaliter
+  *   in een aparte procedure Do_delete_line doen maar de bewerkingen zijn zo
+  *   beperkt dat we het hier doen.
+  *   Kopieer de deleted lines naar een table: boekregelsTrash
+  *
+  *****************************************************************{{{ */
+  function Delete_line($boekregelid=0, $isditbtw='') {
+    global $msg, $stam;
+
+    // we moeten het grootboeksaldo bijwerken en hebben daarvoor de grootboekrekening
+    // van deze boekregel nodig. We gebruiken voor de gegevens van de boekregel het
+    // $this->boekregel[boekregelnr] object
+    if(!$obj = $this->boekregel[$boekregelid]) return(false);
+
+    // check of de boekregel een btwrelatie heeft en verwijder die
+    if($obj->btwrelatie) {
+      $this->Delete_line($obj->btwrelatie, 'btw');
+    }
+
+    // check of de boekregel elders een btwrelatie is en nul die
+    if($tmp = $stam->Get_field("boekregelid", $stam->boekregelstbl, "\"btwrelatie\"={$obj->boekregelid} and \"boekjaar\"={$this->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__)) { // gevonden
+      $stam->Do_query("UPDATE {$stam->boekregelstbl} SET \"btwrelatie\"=0 WHERE \"boekregelid\"={$tmp}",$this->file."::".__FUNCTION__."::".__LINE__);
+      $msg['blue'][] = "BTWrelatie van boekregel {$obj->boekregelid} op 0 gezet!";
+    }
+
+    // check op een factuurrelatie
+    if($obj->factuurrelatie) {
+/* object hier
+stdClass Object
+(
+    [journaalid] => 24
+    [boekregelid] => 217
+    [boekdatum] => 2006-02-20
+    [periode] => 1
+    [grootboekrekening] => 1200
+    [btwrelatie] => 0
+    [factuurrelatie] => 2
+    [grootboeknaam] => Debiteuren
+    [relatie] => defensie
+    [nummer] => 105
+    [boorsprong] => 
+    [dagboekcode] => rabo
+    [jomschrijving] => Bankafschrift: 1 - jan
+    [bomschrijving] => Factuurbetaling
+    [bedrag] => 968.75
+*/
+      $this->factuurSaldoBijwerken($obj->grootboekrekening, $obj->bedrag * -1, $obj->factuurrelatie);
+    }
+
+    // verwijder boekregel en werk het grootboeksaldo bij
+    // kopieer eerst de regel naar trash
+    if($stam->Do_query("INSERT INTO {$stam->boekregels_trash} "
+                      ."SELECT * FROM {$stam->boekregelstbl} "
+                      ."WHERE \"boekregelid\"={$obj->boekregelid}",$this->file."::".__FUNCTION__."::".__LINE__)) {
+      $msg['blue'][] = "Boekregel: {$obj->boekregelid} verplaatst naar trash";
+
+      if($stam->Delete_record($stam->boekregelstbl, "\"boekregelid\"={$obj->boekregelid}",$this->file."::".__FUNCTION__."::".__LINE__)) {
+        // als het te verwijderen type een btwrelatie is dan deze relatie verwijderen uit de betreffende boekregel
+        if($isditbtw == 'btw' && $stam->Do_query("UPDATE {$stam->boekregelstbl} SET \"btwrelatie\"=0 WHERE \"btwrelatie\"={$obj->boekregelid}")) 
+          $msg['blue'][] = "Btwrelatie: {$obj->boekregelid} verwijderd!";
+        // saldo bijwerken
+        if($this->grootboekSaldoBijwerken($obj->grootboekrekening,$obj->bedrag * -1)) {
+          if($isditbtw == 'btw')
+            $msg['blue'][] = "Verwijderd BTWboekregel: {$obj->boekregelid} van grootboekrekening: {$obj->grootboekrekening}";
+          else
+            $msg['blue'][] = "Verwijderd boekregel: {$obj->boekregelid} van grootboekrekening: {$obj->grootboekrekening}";
+          return(true);
+        }
+        else return(false);
+      }
+      else return(false);
+    }
+    else return(false);
+
+  } // END FUNCTION Delete_line }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   Journaal_body() 
+  * @SYLLABUS: 
+  *   Print de body van een journaalpost (dus de boekregels en titlebar) in een
+  *   bestaande aform.
+  *
+  *****************************************************************{{{ */
+  function Journaal_body(&$form,$print=false) {
+    global $stam;
+
+    $veldarr = array("width='5%'"
+                    ,"width='15%'"
+                    ,"width='5%' style='text-align:center'"
+                    ,"width='10%'"
+                    ,"width='8%'"
+                    ,"width='40%'"
+                    ,"width='12%'"
+                    ,"width='12%'"
+                    );
+  
+    // HOUSEKEEPING
+
+    // de labels zijn bij bankboek of kasboek anders omdat we daarbij de boekingen uitgaan van
+    // een bankafschrift of een kasblad. Default:
+    $label['debet']  = 'debet';
+    $label['credit'] = 'credit';
+    
+    // vlag polawissel geeft aan of de te tonen bedragen straks moeten worden gepolariseerd.
+    $polawissel = false;
+
+    // PREPROCESSING TONEN BOEKREGELS
+
+    switch($this->dagboektype) {
+
+      case 'bank'    :
+        // labels aanpassen
+        $label['debet']  = 'ontvangen';
+        $label['credit'] = 'betaald';
+        // polariteit omdraaien, immers voor het bankboek geldt bij uitvoer hetzelfde als bij invoer:
+        // de polariteit is gerelateerd aan de manier waarop een bankjournaalpost getoond wordt, nl
+        // als bankafschrift.
+        $polawissel = true;
+        // iets wezenlijks bij een bankafschrift is dat de saldoboeking naar het bankboek 
+        // (de eerste boekregel, die wordt geboekt in _journaal_save.inc) niet
+        // als standaard boekregel wordt getoond. Hij zou daar immers aan de 'verkeerde' kant 
+        // tonen: een debet boeking (bij) toont aan de uitgaven kant (af).
+        // We moeten met die banksaldo boeking iets anders. Wat we voorlopig doen is de boekregel boven
+        // de blauwe headerregel laten verschijnen met een eigen tekst. Daarvoor moeten we een aparte
+        // blockline maken en nog voor de head blockline tonen. Deze boekregel kan niet worden aangeklikt
+        // om te editten. Voordeel is dat we hier alle boekregels van de
+        // journaalpost al in het object hebben dus we kunnen ze op een
+        // willekeurig moment bevragen en tonen.
+        // 1. Zoek eerst het boekregelobject met de standaard grootboekrekening boeking
+        foreach($this->boekregel AS $key=>$val) 
+          if($val->grootboekrekening == $this->dagboekgrootboekrekening) {
+            $this->printBanksaldo($form,$this->boekregel[$key],$veldarr,$print,'bank');
+            unset($this->boekregel[$key]);
+          }
+        break;
+
+      case 'kas'    :
+        // labels aanpassen
+        $label['debet']  = 'ontvangen';
+        $label['credit'] = 'betaald';
+        // polariteit omdraaien
+        $polawissel = true;
+        // de eerste boekregel
+        $xarr = Array();
+        foreach($this->boekregel AS $key=>$val) {
+          if($val->grootboekrekening == $this->dagboekgrootboekrekening) {
+            // Bij kasblad kunnen meerdere kassaldo boekingen per kasblad
+            // voorkomen, b.v. als we al een saldo hebben weggeboekt en later
+            // nog boekregels toevoegen of wijzigen waardoor weer een nieuw
+            // kassaldo ontstaat. Dit is eigenlijk geen gewenste situatie:
+            // gewenst is dat geen nieuwe boekregels meer kunnen worden
+            // toegevoegd of bedragen van boekregels aangepast als eenmal een
+            // kassaldo van een kasblad naar de kasrekening is geboekt.
+            $xarr[] = $this->boekregel[$key];
+            unset($this->boekregel[$key]);
+          }
+        }
+        //!$print and $this->printBanksaldo($form,$xarr,$veldarr,'kas');
+        $this->printBanksaldo($form,$xarr,$veldarr,$print,'kas');
+        break;
+
+    } // END PREPROCESSING
+
+
+    if($print or $this->dagboektype == 'bank' or $this->dagboektype =='kas') {
+      $form->blockTableEnd();
+      $form->blockTableStart();
+    }
+    else {
+      $form->fieldSetBridge("Boekregels",array('','Journaal..boekregels','Boekregels'));
+    }
+
+      $form->blockLine('4',
+                       array("<div class='schemarow_head'>nr</div>"
+                            ,"<div class='schemarow_head_center'>datum</div>" 
+                            ,"<div class='schemarow_head_center'>gr.boek</div>" 
+                            ,"<div class='schemarow_head_center'>factuur</div>" 
+                            ,"<div class='schemarow_head_center'>relatie</div>" 
+                            ,"<div class='schemarow_head'>omschrijving</div>" 
+                            ,"<div class='schemarow_head_debet'>{$label['debet']}</div>" 
+                            ,"<div class='schemarow_head_credit'>{$label['credit']}</div>" 
+                            ), 
+                       $veldarr
+                       );
+#printrc2($stam,"stam in Journaal_body: ");
+#printrc2($this, "this in Journaal_body: ");
+
+    foreach($this->boekregel AS $key=>$val) {
+
+      $polawissel and $val->bedrag *= -1;
+      $val->relatie = substr($val->relatie,0,7);
+
+      // Bij een negatief bedrag moet het bedrag getoond worden in de credit
+      // kolom, echter zonder -teken. Draai het bedrag om voor het tonen in een
+      // credit kolom; dit impliceert immers al een -
+      //
+      $val->bedrag < 0 and $val->credit = ($val->bedrag * -1) or $val->debet = $val->bedrag;
+
+      if($stam->boekjaarSemiBlocked) {
+        $omschrijving = "<div class='schemarow_std'>{$val->bomschrijving}</a></div>" ;
+      }
+      else {
+        $omschrijving = ($print) ?
+        "<div class='schemarow_std'><a href='/run.php?app=journaalpost&journaalid={$this->journaalid}' style='color:black;text-decoration:none'>{$val->bomschrijving}</a></div>" :
+        "<div class='schemarow_std'><a href='#' onClick=\"editLine('{$this->journaalid}','{$key}');\" style='color:black;text-decoration:none'>{$val->bomschrijving}</a></div>";
+      }
+
+      $form->blockLine('',
+                       array("<div class='schemarow_std'>{$val->boekregelid}</div>"
+                            ,"<div class='schemarow_std'>".$GLOBALS['timer']->iso2norm($val->boekdatum)."</div>" 
+                            ,"<div class='schemarow_std' title='$val->grootboeknaam' style='cursor:pointer;'>{$val->grootboekrekening}</div>" 
+                            ,"<div class='schemarow_center'>{$val->nummer}</div>" 
+                            ,"<div class='schemarow_center'>{$val->relatie}</div>" 
+                            ,$omschrijving 
+                            ,"<div class='schemarow_debet'>".formatbedrag($val->debet,$nul=false)."</div>" 
+                            ,"<div class='schemarow_credit'>".formatbedrag($val->credit,$nul=false)."</div>" 
+                            ), 
+                       $veldarr
+                       );
+
+    } // END FOREACH
+ 
+    // spacerline
+
+      $form->blockLine('2',
+                       array("<div style='padding-top:1px'></div>"), 
+                       array("colspan='8'")
+                       );
+
+  } // END FUNCTION Journaal_body }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   Boekregel_edit() 
+  * @SYLLABUS: 
+  *   Print een boekregel in editform in een bestaande aform.
+  *   Er kan zowel een lege als een gevulde (edit) boekregel worden geprint.
+  *
+  *****************************************************************{{{ */
+  function Boekregel_edit(&$form,$boekregel='') {
+    global $stam;
+    
+    // HOUSEKEEPING
+    //
+
+    $disabled = array("boekdatum"=>"","grootboekrekening"=>"","factuurnummer"=>"","bomschrijving"=>""
+                     ,"debet"=>"","credit"=>"","btwbedrag"=>"","kostenplaats"=>"");
+    
+    $veldarr = array("width='7%'"
+                    ,"width='12%'"
+                    ,"width='5%' style='text-align:center'"
+                    ,"width='13%'"
+                    ,"width='43%'"
+                    ,"width='10%'"
+                    ,"width='10%'"
+                    );
+
+    $tmp = $head = '';
+
+    //
+    // initieer buttons om foutnotices in de print te voorkomen
+    //
+    $finalebutton = $savebutton = $verwijderbutton = '';
+
+    //
+    // idem nummer en btwbedrag
+    //
+    !isset($nummer) and $nummer = '';
+    !isset($btwbedrag) and $btwbedrag = '';
+
+    // bij nieuw en bestaand boekregels
+    //
+
+    //
+    // we hebben factuurnummer overal nodig waar geen factuurnummer in de journaalgegevens worden 
+    // ingegeven zoals b.v. bij het inkoop-verkoopboeken het geval is.
+    //
+    $line['factuurnummer'] = "<div><input type='text' size='6' name='factuurnummer' value='{$nummer}'  /></div>";
+
+    //
+    // we hebben de savebutton vrijwel overal nodig alleen bij bepaalde boekingen (b.v. waarop een factuurbetaling
+    // is geboekt) niet, dat zijn automatische boekingen die niet meer geupdate mogen worden.
+    //
+    $savebutton = "<input type='submit' name='opslaanline' value='opslaan' size='10' class='bsmall2' class='bsmall2' "
+                 ." onClick=\"saveLine('{$boekregel}','');return(false);\" />";
+          
+    //
+    // de labels zijn bij bankboek en kasboek anders omdat we daarbij de boekingen uitgaan van
+    // een bankafschrift of een kasblad
+    //
+    $label['debet']  = 'debet';
+    $label['credit'] = 'credit';
+
+    //
+    // vlag polawissel geeft aan of de te tonen bedragen straks moeten worden gepolariseerd.
+    //
+    $polawissel = false;
+
+    // BEPAAL OF HET EEN BESTAANDE OF EEN NIEUWE BOEKREGEL IS
+    //
+    // Bestaande boekregel
+    //
+    if($boekregel != '') { 
+      $val = $this->boekregel[$boekregel];
+      $verwijderbutton = "<input type='button' name='verwijder' value='verwijder' size='10' class='bsmall2' "
+                        ."onClick=\"deleteLine('{$val->boekregelid}')\"/>";
+
+      if($val->factuurrelatie) { // automatische boeking geweest, mag niet meer geupdate worden
+        $savebutton = '';
+        //
+        // disable alle velden
+        //
+        foreach($disabled AS $key=>$tmp) $disabled[$key] = DISABLED;
+      }
+
+      $head = "Bewerk boekregel";
+      $help = array('','Journaal..bewerkBoekregel','Bewerk boekregel');
+      $isnieuwtag = '0';
+      $relatie = $val->relatie;
+      $nummer = $val->nummer;
+      $line['factuurnummer'] = "<div><input type='text' size='9' name='factuurnummer' value='{$nummer}' {$disabled['factuurnummer']} /></div>";
+      $boorsprong = $val->boorsprong;
+
+      //
+      // Preprocessing bestaande boekregel
+      //
+      switch($this->dagboektype) {
+
+        case 'bank'    :
+          $head = "Bewerk bankafschriftregel - <i>denk erom dat je debet/credit boekt zoals in het bankafschrift staat</i>";
+          $help = array('','Journaal..bewerkBankregel','Bewerk boekregel bankafschrift');
+          $label['debet']  = 'ontvangen';
+          $label['credit'] = 'betaald';
+          //
+          // polariteit omdraaien, immers voor het bankboek geldt bij uitvoer hetzelfde als bij invoer:
+          // de polariteit is gerelateerd aan de manier waarop een bankjournaalpost getoond wordt, nl
+          // als bankafschrift.
+          //
+          $polawissel = true;
+          break;
+
+        case 'kas'     :
+          $head = "Bewerk kasbladregel - <i>denk erom dat je debet/credit boekt zoals in het kasblad staat</i>";
+          $help = array('','Journaal..bewerkKasbladregel','Bewerk boekregel kasblad');
+          $label['debet']  = 'ontvangen';
+          $label['credit'] = 'betaald';
+          // polariteit omdraaien
+          $polawissel = true;
+          break;
+
+        case 'inkoop'  :
+        case 'verkoop' :
+        case 'pin' :
+          //
+          // bij inkoop- en verkoopboek is het facuurnummer verzegeld
+          //
+          $disabled['factuurnummer'] = DISABLED;
+          $line['factuurnummer'] = "<div><input type='text' size='9' name='viewfactuurnummer' value='{$nummer}' {$disabled['factuurnummer']} /></div>\n"
+                                  ."<input type='hidden' name='factuurnummer' value='{$nummer}' />";
+          break;
+
+        case 'begin'   :
+          $disabled['factuurnummer'] = DISABLED;
+          $line['factuurnummer'] = "<div><input type='text' size='9' name='factuurnummer' value='' {$disabled['factuurnummer']} /></div>";
+          break;
+
+        default        :
+          break;
+
+      } // END switch
+
+    }
+    //
+    // Nieuwe boekregel
+    //
+    else          { 
+      $val = $this->emptyBoekregel();
+      $head = "Nieuwe boekregel";
+      $help = array('','Journaal..nieuweBoekregel','Nieuwe boekregel');
+      $isnieuwtag = '1';
+      //
+      // default waardes
+      //
+      $relatie = $this->jrelatie;
+      $nummer = $this->jnummer;
+      $boorsprong = $this->joorsprong;
+
+      //
+      // Preprocessing nieuwe boekregel
+      //
+      switch($this->dagboektype) {
+
+        case 'bank'    :
+          $head = "Nieuwe bankafschriftregel - <i>denk erom dat je debet/credit boekt zoals in het bankafschrift staat</i>";
+          $help = array('','Journaal..nieuweBankregel','Bewerk boekregel bankafschrift');
+          $label['debet']  = 'ontvangen';
+          $label['credit'] = 'betaald';
+          $polawissel = true;
+          break;
+
+        case 'kas'     :
+          $head = "Nieuwe kasbladregel - <i>denk erom dat je debet/credit boekt zoals in het kasblad staat</i>";
+          $help = array('','Journaal..nieuweKasbladregel','Bewerk boekregel kasblad');
+          $label['debet']  = 'ontvangen';
+          $label['credit'] = 'betaald';
+          $polawissel = true;
+          //
+          // niet default de omschrijving invullen vanuit de journaalpost.
+          // de omschrijving van kasstukken en bankstukken is meestal voor elk stuk uniek.
+          // althans bij kasbladen, niet zozeer bij enkele journaalposten
+          //
+          $val->bomschrijving = '';
+          break;
+
+        case 'inkoop'  :
+        case 'verkoop' :
+        case 'pin' :
+          //
+          // bij inkoop- en verkoopboek is het facuurnummer verzegeld
+          //
+          $disabled['factuurnummer'] = DISABLED;
+          $line['factuurnummer'] = "<div><input type='text' size='9' name='viewfactuurnummer' value='{$nummer}' {$disabled['factuurnummer']} /></div>\n"
+                                  ."<input type='hidden' name='factuurnummer' value='{$nummer}' />";
+          break;
+
+        case 'begin'   :
+          $disabled['factuurnummer'] = DISABLED;
+          $line['factuurnummer'] = "<div><input type='text' size='9' name='factuurnummer' value='' {$disabled['factuurnummer']} /></div>";
+          break;
+
+        default        :
+          break;
+
+      } // END switch
+
+      //
+      // finalebutton als het dagboek met dagboekcode een eigen grootboekrekeningnummer heeft.
+      // Met deze button kan het resterende saldo op dat grootboek worden geboekt.
+      // LET OP: dit werkt alleen bij een kasblad omdat het resterende saldo
+      // hier achteraf als laatste post naar de rekening kas wordt geboekt. Bij
+      // een bankblad kan het niet omdat het saldo daar bij het begin van de
+      // journaalpost al naar rekening bank wordt geboekt.
+      // Bij bank laten we de knop wel staan maar die werkt alleen als er een
+      // grootboekrekening is ingevuld zodat het resterende saldo op die
+      // rekening wordt geboekt. Dit laatste wordt gecontroleerd in journaal.js
+      //
+      if($this->dagboekgrootboekrekening && $this->saldo <> 0 
+          && ($this->dagboektype != 'bank' or $this->dagboektype != 'kas')) {
+        if($this->dagboektype == 'kas')
+          $finalebutton = "<input type='button' name='finalebutton' value='boeking afronden' title='boeking afronden naar rekening: [{$this->dagboekgrootboekrekening}]' size='10' class='bsmall2' class='bsmall2' onClick=\"saveLine('{$boekregel}','finale')\"/>";
+        else
+          $finalebutton = "<input type='button' name='finalebutton' value='boeking afronden' title='boeking afronden' size='10' class='bsmall2' class='bsmall2' onClick=\"saveLine('{$boekregel}','finale')\"/>";
+      }
+      
+    } // END ELSE (nieuwe boekregel)
+
+    //
+    // BTW array
+    //
+    $selected_btw = array(INHOOG=>'',INLAAG=>'',EXHOOG=>'',EXLAAG=>'',GEENBTW=>'');
+
+    // START PRINT
+    //
+
+    $form->fieldSetBridge($head,$help);
+
+      $form->blockLine('3',
+                       array("<div class='schemarow_head'>nr</div>"
+                            ,"<div class='schemarow_head_center'>datum</div>" 
+                            ,"<div class='schemarow_head_center'>gr.boek</div>" 
+                            ,"<div class='schemarow_head_center'>factuur</div>" 
+                            ,"<div class='schemarow_head'>omschrijving</div>" 
+                            ,"<div class='schemarow_head_debet'>{$label['debet']}</div>" 
+                            ,"<div class='schemarow_head_credit'>{$label['credit']}</div>" 
+                            ), 
+                       $veldarr
+                       );
+
+      $polawissel and $val->bedrag *= -1;
+
+      //
+      // Zet het bedrag in debet of credit, afhankelijk of het een -bedrag is.
+      // Draai een -bedrag om voor het tonen in een credit kolom; dit impliceert immers al -
+      //
+      if($val->bedrag < 0) $val->credit = ($val->bedrag * -1); 
+      else $val->debet = $val->bedrag;
+
+      //
+      // formatteer val->debet en val->credit
+      //
+      $val->debet = formatbedrag($val->debet,$nul=false);
+      $val->credit = formatbedrag($val->credit,$nul=false);
+
+      $form->blockLine('',
+                       array("<div class='schemarow_std'>{$val->boekregelid}<input type='hidden' name='boekregelid' value='{$val->boekregelid}' /></div><input type='hidden' name='isnieuw' value='{$isnieuwtag}' />"
+                            ,"<div><input type='text' size='10' name='boekdatum' value='".$GLOBALS['timer']->iso2norm($val->boekdatum)."' onChange='doCheckDatum(this,\"\",\"{$this->boekjaar}\");' {$disabled['boekdatum']} /></div>" 
+                            ,"<div style='white-space:nowrap;'><input type='text' size='4' name='grootboekrekening' title='{$val->grootboeknaam}' value='{$val->grootboekrekening}' onChange='checkGrbBtw(this);' {$disabled['grootboekrekening']} />
+                              <a href='#' onClick='grbSelectie();'><img src='/img/b_search.png' border='0' title='opzoeken grootboekrekeningen' /></a></div>" 
+                            ,$line['factuurnummer'] 
+                             ."<input type='hidden' name='relatie' value='{$relatie}' />"
+                             ."<input type='hidden' name='boorsprong' value='{$boorsprong}' />"
+                            ,"<div><input type='text' size='30' name='bomschrijving' value=\"{$val->bomschrijving}\" {$disabled['bomschrijving']} /></div>" 
+                            ,"<input type='text' class='amount' size='10' name='debet' onChange=\"var x=document.forms['frm1'];x.credit.value='';x.bedrag.value='';\" value='{$val->debet}' {$disabled['debet']} />" 
+                            ,"<input type='text' class='amount' size='10' name='credit' onChange=\"var x=document.forms['frm1'];x.debet.value='';x.bedrag.value='';\" value='{$val->credit}' {$disabled['credit']} />\n" 
+                            ."<input type='hidden' name='bedrag' value='{$val->bedrag}' />\n"
+                            ."<input type='hidden' name='reverse' value='{$polawissel}' />"
+                            ), 
+                       $veldarr
+                       );
+    
+    // BTW line
+    //
+    // als het gevraagde grootboekrekeningnummer van het type GEENBTW of groter (BTWVERKOOPVERLEGD) is, dan de BTW velden disablen
+    // OF ALS de periode de extra periode is waarin eigenlijk geen BTW
+    // boekingen zouden mogen plaatsvinden omdat de reguliere periodes al zijn
+    // geconsolideerd en er geen aangifte voor een extra periode kan worden
+    // gedaan. Ook in dit geval disablen. TODO dit moeten we nog nader uitwerken
+    //
+    // Uiteraard moet er dan eerst wel een gevulde boekregel zijn; ingeval een
+    // nieuwe boekregel is hier een Dummy val geladen en die is nog erg leeg.
+    $disabled['btw'] = DISABLED;
+    if($val->grootboekrekening)
+      $disabled['btw'] = ($this->periode == $stam->periodeextra['value']) ? DISABLED : '';
+
+#printrc2($val, "val in de BTW line: \n");
+#printrc2($this, "this in de BTW line: \n");
+
+      // Dat Kl@te Internet Explorer heeft weer wat: radiobuttons reageren pas
+      // op onChange als de button focus verliest, dus niet als je erop klikt.
+      // onFocus werkt wel. In Google Chrome werkt onFocus echter weer niet en
+      // moet het onChange zijn. In FF werkt beide. Dus van ellende moeten we
+      // hier vanwege dat K#@%&t IE weer een browser onderscheid maken.
+      $onActie = (strpos($_SERVER['HTTP_USER_AGENT'], 'MSIE')) ? 'onFocus' : 'onChange';
+
+      $btwline = "<b>BTW</b>"
+                ." &nbsp;<span class='lightgray'>[incl.hoog:<input type='radio' name='btw' {$onActie}=\"calcbtw(this.value);\" value='".INHOOG."' ".$selected_btw[INHOOG]." {$disabled['btw']} />]</span>\n"
+                ." &nbsp;<span class='lightgray'>[incl.laag:<input type='radio' name='btw' {$onActie}=\"calcbtw(this.value);\" value='".INLAAG."' ".$selected_btw[INLAAG]." {$disabled['btw']} />]</span>\n"
+                ." &nbsp;<span class='lightgray'>[excl.hoog:<input type='radio' name='btw' {$onActie}=\"calcbtw(this.value);\" value='".EXHOOG."' ".$selected_btw[EXHOOG]." {$disabled['btw']} />]</span>\n"
+                ." &nbsp;<span class='lightgray'>[excl.laag:<input type='radio' name='btw' {$onActie}=\"calcbtw(this.value);\" value='".EXLAAG."' ".$selected_btw[EXLAAG]." {$disabled['btw']} />]</span>\n"
+                ." &nbsp;<span class='lightgray'>[geen btw:<input type='radio' name='btw' {$onActie}=\"calcbtw(this.value);\" value='".GEENBTW."' ".$selected_btw[GEENBTW]." {$disabled['btw']} />]</span>";
+      
+      $form->blockLine('',array("<div style='padding: 3 0 0 0'>".$btwline."</div>"
+                               ,"<div>bedrag: "
+                               ."<input type='text' size='8' name='btwbedrag' value='{$btwbedrag}' {$disabled['btw']} style='text-align:right;' /> <span id='btwnummer' style='color:blue;' title=''></span></div>"
+                               ),
+                           array("colspan='5' style='white-space:nowrap;'","colspan=2 ") );
+
+
+    // Hier moet de regel voor kostenplaatsen komen
+    //
+      $kostenplaats = !isset($val->kostenplaats) ? "" : "[$val->kostenplaats] " . "$val->kostennaam" ;
+      $disabled['kostenplaats'] = DISABLED;
+
+      $form->blockLine('',array("<div class='schemarow_std'>Kostenplaats: </div>"
+                               ,"<input type='text' size='40' name='kostenplaats' value='{$kostenplaats}' {$disabled['kostenplaats']} style='text-align:left;' />"
+                              ), 
+                          array("colspan='2'", "colspan='6'")
+                         );
+
+    // BUTTONS VOOR BOEKREGEL_EDIT
+    //
+
+      $buttons=<<<EOT
+
+        {$savebutton} 
+        {$verwijderbutton} 
+        {$finalebutton}
+        <input type="button" name="sluiten" value="sluiten" size="10" class='bsmall2' class='bsmall2' 
+          onClick="closeLine('{$this->journaalpost}');" />
+EOT;
+
+      $form->blockLine('',array("<div style='padding: 3 0 0 0'>".$buttons."</div>"),
+                          array("colspan='8'") );
+
+
+    // SPACERLINE
+    //
+
+      $form->blockLine('',
+                       array("<div><input type='hidden' name='factuurid' /></div>"
+                            ,"<div></div>"
+                            ,"<div></div>"
+                            ,"<div></div>"
+                            ,"<div></div>"
+                            ,"<div><img src='/img/clear.gif' width='90' height='1' /></div>"
+                            ,"<div><img src='/img/clear.gif' width='90' height='1' /></div>"
+                            ), 
+                       $veldarr
+                       );
+
+  } // END FUNCTION Boekregel_edit }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   printBanksaldo() 
+  * @SYLLABUS: 
+  *   Print het kas- of banksaldo header en journaalregel.
+  *
+  *****************************************************************{{{ */
+  function printBanksaldo(&$form,&$val,&$veldarr,$print,$type='bank') {
+
+    // HOUSEKEEPING
+
+    $label['debet'] = 'debet';
+    $label['credit'] = 'credit';
+
+    if(! $print) {
+      if($type == 'bank')
+        $form->fieldSetBridge("Saldoboeking van dit bankstuk",array('','Journaal..bankblad','Bankblad'));
+      else
+        $form->fieldSetBridge("Saldoboeking van dit kasblad",array('','Journaal..kasblad','Kasblad'));
+    }
+    // Indien printen van een journaalpost in journaalpostenoverzicht direct de
+    // saldobalk onderaan de header van de journaalpost doorprinten.
+    else {
+      $form->blockTableEnd();
+      $form->blockTableStart();
+    }
+
+      $form->blockLine('5',
+                       array("<div class='schemarow_head_white'>nr</div>"
+                            ,"<div class='schemarow_head_white'>datum</div>" 
+                            ,"<div class='schemarow_head_white'>gr.boek</div>" 
+                            ,"<div class='schemarow_head_center_white'></div>" 
+                            ,"<div class='schemarow_head_center_white'></div>" 
+                            ,"<div class='schemarow_head_white'>omschrijving</div>" 
+                            ,"<div class='schemarow_head_debet_white'>{$label['debet']}</div>" 
+                            ,"<div class='schemarow_head_credit_white'>{$label['credit']}</div>" 
+                            ), 
+                       $veldarr
+                       );
+
+      // Als er meerdere saldi zijn (kan bij het kasblad voorkomen bij
+      // naboekingen of correctieboekingen) dan wordt $val als een array
+      // aangeleverd en moeten de boekregels hier onder elkaar worden getoond
+      // onder 1 header.
+      //
+      if(is_array($val)) {
+        foreach($val AS $xval) {
+      // draai het bedrag om (haal het -teken eraf) voor het tonen in een credit kolom; dit impliceert immers al een -
+      $xval->bedrag < 0 and $xval->credit = ($xval->bedrag * -1) or $xval->debet = $xval->bedrag;
+
+      $form->blockLine('2',
+                       array("<div class='schemarow_std'>{$xval->boekregelid}</div>"
+                            ,"<div class='schemarow_std'>".$GLOBALS['timer']->iso2norm($xval->boekdatum)."</div>" 
+                            ,"<div class='schemarow_std' title='$xval->grootboeknaam' style='cursor:pointer;'>{$xval->grootboekrekening}</div>" 
+                            ,"<div class='schemarow_center'></div>" 
+                            ,"<div class='schemarow_center'></div>" 
+                            ,"<div class='schemarow_std'>{$xval->bomschrijving}</div>" 
+                            ,"<div class='schemarow_debet'>".formatbedrag($xval->debet,$nul=false)."</div>" 
+                            ,"<div class='schemarow_credit'>".formatbedrag($xval->credit,$nul=false)."</div>" 
+                            ), 
+                       $veldarr
+                       );
+        }
+      }
+
+      else { // éénmalig printen
+
+      // het saldobedrag niet polariseren omdat het een saldo van een grootboekrekening is en geen boeking
+      // zoals op het bankafschrift voorkomt.
+
+      // draai het bedrag om (haal het -teken eraf) voor het tonen in een credit kolom; dit impliceert immers al een -
+      $val->bedrag < 0 and $val->credit = ($val->bedrag * -1) or $val->debet = $val->bedrag;
+
+      $form->blockLine('2',
+                       array("<div class='schemarow_std'>{$val->boekregelid}</div>"
+                            ,"<div class='schemarow_std'>".$GLOBALS['timer']->iso2norm($val->boekdatum)."</div>" 
+                            ,"<div class='schemarow_std' title='$val->grootboeknaam' style='cursor:pointer;'>{$val->grootboekrekening}</div>" 
+                            ,"<div class='schemarow_center'></div>" 
+                            ,"<div class='schemarow_center'></div>" 
+                            ,"<div class='schemarow_std'>{$val->bomschrijving}</div>" 
+                            ,"<div class='schemarow_debet'>".formatbedrag($val->debet,$nul=false)."</div>" 
+                            ,"<div class='schemarow_credit'>".formatbedrag($val->credit,$nul=false)."</div>" 
+                            ), 
+                       $veldarr
+                       );
+      }
+
+    // spacerline
+
+      $form->blockLine('2',
+                       array("<div style='padding-top:1px'></div>"), 
+                       array("colspan='8'")
+                       );
+
+  } // END FUNCTION printBanksaldo }}}
+  
+
+  /* ****************************************************************
+  * @METHOD:   boekregelDuplicate() 
+  * @SYLLABUS: 
+  *   Switch in een boekregels object het bestaande bedrag naar oudbedrag en
+  *   het bestaande bedrag wordt nieuwbedrag.
+  *   Dit hebben we nodig in Do_update_line()
+  *   Punten: een nieuwbedrag van 0 kan niet, we kunnen geen saldo van een
+  *   rekening op 0 zetten, dat is invalide. Verwijder dan de boekregel
+  *   Hetzelfde geldt voor nieuwgrootboekrekening, dit kan ook geen 0 zijn.
+  *   In beide gevallen geldt: wordt een 0 aangeboden, handhaaf dan het oude
+  *   waarde.
+  *
+  *****************************************************************{{{ */
+  function boekregelDuplicate($obj,$nieuwbedrag=0,$nieuwgrootboekrekening=0) {
+printrc2($obj, "obj in boekregelDuplicate: ");
+printrc2($nieuwbedrag, "nieuwbedrag in boekregelDuplicate: ");
+    $obj->oudbedrag = $obj->bedrag;
+    if($nieuwbedrag) 
+      $obj->bedrag = $nieuwbedrag;
+    
+    // als het bedrag veranderd is, zet een vlag voor later gebruik
+    $obj->bedrag <> $obj->oudbedrag and $obj->bedragveranderd=true or $obj->bedragveranderd=false;
+    
+    $obj->oudgrootboekrekening = $obj->grootboekrekening;
+    if($nieuwgrootboekrekening) 
+      $obj->grootboekrekening = $nieuwgrootboekrekening;
+
+    return($obj);
+
+  } // END FUNCTION boekregelSwitchbedrag }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   setDagboekLock($arr) TODO: WERKT NOG NIET, UPDATE IS TE VERSCHILLEND
+  * @PARAMETERS: array $arr: bevat de argumenten voor de update actie:
+  * @SYLLABUS: 
+  *   Zet het slot bij bepaalde dagboeken. Indien <value> dan staat er een
+  *   slot, indien 0 dan is het slot vrijgegeven.
+  *   
+  *****************************************************************{{{ */
+  function setDagboekLock($arr) {
+
+    // plaats de temp gegevens terug in dagboeken'$this->dagboekcode' en verwijder evt het slot
+    //
+    $GLOBALS['stam']->Do_query("UPDATE {$GLOBALS['stam']->dagboeken} "
+                       ." SET \"boeknummer\"={$arr['vorigeboeknummer']}"
+                       .",\"saldo\"='{$arr['saldo']}'"
+                       .",\"slot\"={$arr['lock']} "
+                       ."WHERE \"code\"='{$arr['code']}' AND \"boeknummer\"={$arr['huidigeboeknummer']}",$this->file."::".__FUNCTION__."::".__LINE__);
+
+  } // END FUNCTION setDagboekLock }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   postReload() TODO: WERKT NIET
+  * @SYLLABUS: 
+  *   Herlaadt de journaalpost.
+  *   Dit is b.v. nodig als een boekingsregel is veranderd of verwijderd.
+  *   
+  *****************************************************************{{{ */
+  function postReload($journaalid='') {
+
+      // Als op dit punt nog een journaalpost geladen is, moet die eruit
+      //
+      $this->boekjaar='';
+      $this->datum='';
+      $this->boekdatum='';
+      $this->periode=0; // periode kan niet leeg zijn ivb fouten tijdens sql
+      $this->dagboekcode='';
+      $this->dagboektype='';
+      $this->dagboekgrootboekrekening='';
+      $this->jomschrijving='';
+      $this->bomschrijving='';
+      $this->tekst='';
+      $this->saldo='';
+      $this->boekregelsaldo='';
+      $this->boorsprong='';
+      $this->jrelatie='';
+      $this->joorsprong='';
+      $this->jnummer='';
+      $this->journaalid = '';
+      $this->journaalpost = '';
+      $this->boekregel = array();
+
+    if($journaalid='') 
+      $this->Journaal();
+    else
+      $this->Journaal($this->journaalid);
+
+  } // END FUNCTION boekregelSwitchbedrag }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   int relatieId( str $code, str $boek ) 
+  * @SYLLABUS: 
+  *   Returnt het id van debiteurenstam of crediteurenstam op basis van de code
+  *
+  *****************************************************************{{{ */
+  function relatieId($code,$boek) {
+    if(! $code) return(false);
+    switch($boek) {
+      case 'crediteuren' :
+        return($GLOBALS['stam']->Get_field('"id"', $GLOBALS['stam']->crediteurenstam, "\"code\"='$code'",$this->file."::".__FUNCTION__."::".__LINE__));
+        break;
+      case 'debiteuren' :
+        return($GLOBALS['stam']->Get_field('"id"', $GLOBALS['stam']->debiteurenstam, "\"code\"='$code'",$this->file."::".__FUNCTION__."::".__LINE__));
+        break;
+      default: 
+        return(false);
+        break;
+    }
+  } // END FUNCTION relatieId}}}
+
+
+  /* ****************************************************************
+  * @METHOD:   int relatieCode( int $id, str $boek ) 
+  * @SYLLABUS: 
+  *   Returnt de code van debiteurenstam of crediteurenstam op basis van het id
+  *
+  *****************************************************************{{{ */
+  function relatieCode($id,$boek) {
+    if(! $id) return(false);
+    switch($boek) {
+      case 'crediteuren' :
+        return($GLOBALS['stam']->Get_field('"code"', $GLOBALS['stam']->crediteurenstam, "\"id\"=$id",$this->file."::".__FUNCTION__."::".__LINE__));
+        break;
+      case 'debiteuren' :
+        return($GLOBALS['stam']->Get_field('"code"', $GLOBALS['stam']->debiteurenstam, "\"id\"=$id",$this->file."::".__FUNCTION__."::".__LINE__));
+        break;
+      default: 
+        return(false);
+        break;
+    }
+  } // END FUNCTION relatieCode}}}
+
+
+  /* ****************************************************************
+  * @METHOD:   int dagboekenPullDown( [str $where] ) 
+  * @SYLLABUS: 
+  *   Returnt de inhoud van een dagboeken PullDown html-element
+  *
+  *****************************************************************{{{ */
+  function dagboekenPullDown($where='') {
+    
+    if($where) $where = "WHERE ".$where;
+
+    $GLOBALS['stam']->query = "SELECT * FROM {$GLOBALS['stam']->dagboeken} {$where} ORDER BY \"id\"";
+    $GLOBALS['stam']->Do_sql($this->file.'::'.__FUNCTION__.'::'.__LINE__);
+
+    $dagboeken = "\n<option value='none'>---------------</option>";
+
+    while($obj = $GLOBALS['stam']->Do_object()) {
+      if($obj->code == $this->dagboekcode) {
+        $dagboeken .= "\n<option selected='selected' value='{$obj->code}'>{$obj->naam}</option>";
+        $this->code_gevonden = true;
+      }
+      else 
+        $dagboeken .= "\n<option value='{$obj->code}'>{$obj->naam}</option>";
+    }
+    return($dagboeken);
+ 
+  } // END FUNCTION dagboekenPullDown}}}
+
+
+} // END CLASS Journaal}}}
+
+
+
+/* ****************************************************************
+* @CLASS:   Journaalpost extends Journaal 
+* @SYLLABUS: 
+*   Deze Class bevat methoden om onafhankelijk een journaalpost aan te maken en
+*   eveneens onafhankelijk boekingsregels aan te maken of te updaten. De Class
+*   wordt gebruikt bij routines die zelfstandig journaalposten aanmaken zoals
+*   eindejaarsboekingen etc.
+*
+*
+*****************************************************************{{{ */
+Class Journaalpost extends Journaal {
+
+
+  /* ****************************************************************
+  * @METHOD:   bool Journaalpost( [ int $journaalid=0[, int $journaalpost=0 ]] ) 
+  * @SYLLABUS: 
+  *   CONSTRUCTOR: Laad een journaalpost ($journaalid>0) of een lege journaalpost ($journaalid=0)
+  *
+  *****************************************************************{{{ */
+  function Journaalpost($journaalid=0,$journaalpost=0) {
+    return(!parent::__construct($journaalid,$journaalpost)) ? false : true;
+  } // END FUNCTION Journaalpost }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool opslaanJournaalpost( obj $obj ) 
+  * @VARIABLES: 
+  *   - obj $obj: een object met variables en values. De variable-namen zijn de veldnamen
+  * @SYLLABUS: 
+  *   Slaat een nieuwe journaalpost op.
+  *
+  *****************************************************************{{{ */
+  function opslaanJournaalpost($obj) {
+    global $msg, $stam;
+
+    if(!$obj) return(false);
+
+    // Als geen journaalpost wordt meegeleverd, bepaal dan zelf het eerstvolgend beschikbare journaalpost
+    //
+    if(!isset($obj->journaalpost)) {
+      $nieuwid = $stam->Get_field('MAX("journaalpost")',$stam->journaal,"\"boekjaar\"={$this->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__);
+      $obj->journaalpost = ++$nieuwid;
+    }
+
+    // stel de insert vraag samen
+    // betrek alleen values bij de vraag die zijn ingevuld. 
+
+    $fields = '"journaalid"';
+    $values = $lastid = $stam->newId($stam->journaal);
+
+    foreach(get_object_vars($obj) AS $key=>$val) { 
+      switch($key) {
+        case 'journaalpost'   : $fields .= ',"journaalpost"'; $values .=",{$val}";  break;
+        case 'boekjaar'       : $fields .= ',"boekjaar"'; $values .=",{$val}";  break;
+        case 'datum'          : $fields .= ',"datum"'; $values .=",'{$val}'";  break;
+        case 'periode'        : $fields .= ',"periode"'; $values .=",{$val}";  break;
+        case 'dagboekcode'    : $fields .= ',"dagboekcode"'; $values .=",'{$val}'";  break;
+        case 'jomschrijving'  : $fields .= ',"jomschrijving"'; $values .=",'{$val}'";  break;
+        case 'saldo'          : $fields .= ',"saldo"'; $values .=",'{$val}'";  break;
+        case 'jrelatie'       : $fields .= ',"jrelatie"'; $values .=",'{$val}'";  break;
+        case 'jnummer'        : $fields .= ',"jnummer"'; $values .=",'{$val}'";  break;
+        case 'joorsprong'     : $fields .= ',"joorsprong"'; $values .=",'{$val}'";  break;
+        case 'tekst'          : $fields .= ',"tekst"'; $values .=",'{$val}'";  break;
+      }
+    }
+
+    $stam->query = "INSERT INTO {$stam->journaal} ({$fields}) VALUES ({$values}) ";
+    if($stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__)) {
+      $msg['blue'][] = "Toegevoegd: journaalpost({$obj->journaalpost}) - {$obj->dagboekcode}::'{$obj->jomschrijving}' rec:{$lastid}";
+      return($lastid);
+    }
+    else {
+      return(false);
+    }
+
+  } // END FUNCTION opslaanJournaalpost }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool opslaanBoekregel( obj $obj ) 
+  * @VARIABLES: 
+  *   - obj $obj: een object met variables en values. De variable-namen zijn de veldnamen
+  * @SYLLABUS: 
+  *   Insert een nieuwe boekregel.
+  *   Initieert tevens een update grootboeksaldo van de getroffen grootboekrekening.
+  *
+  *****************************************************************{{{ */
+  function opslaanBoekregel($obj) {
+    global $msg, $stam;
+
+    if(!$obj) return(false);
+
+    // stel de insert vraag samen
+    // betrek alleen values bij de vraag die zijn ingevuld. 
+
+    $fields = '"boekregelid"';
+    $values = $lastid = $stam->newId($stam->boekregelstbl);
+
+    foreach(get_object_vars($obj) AS $key=>$val) { 
+      switch($key) {
+        case 'journaalid'        : if($val != '') { $fields .= ',"journaalid"'; $values .=",{$val}"; } break;
+        case 'boekjaar'          : if($val != '') { $fields .= ',"boekjaar"'; $values .=",{$val}"; } break;
+        case 'datum'             : if($val != '') { $fields .= ',"datum"'; $values .=",'{$val}'"; } break;
+        case 'grootboekrekening' : if($val != '') { $fields .= ',"grootboekrekening"'; $values .=",{$val}"; } break;
+        case 'btwrelatie'        : if($val != '') { $fields .= ',"btwrelatie"'; $values .=",'{$val}'"; } break;
+        case 'factuurrelatie'    : if($val != '') { $fields .= ',"factuurrelatie"'; $values .=",'{$val}'"; } break;
+        case 'relatie'           : if($val != '') { $fields .= ',"relatie"'; $values .=",'{$val}'"; } break;
+        case 'nummer'            : if($val != '') { $fields .= ',"nummer"'; $values .=",'{$val}'"; } break;
+        case 'boorsprong'        : if($val != '') { $fields .= ',"oorsprong"'; $values .=",'{$val}'"; } break;
+        case 'bomschrijving'     : if($val != '') { $fields .= ',"bomschrijving"'; $values .=",'{$stam->Prepare($val)}'"; } break;
+        case 'bedrag'            : if($val != '') { $fields .= ',"bedrag"'; $values .=",'{$val}'"; } break;
+      }
+    }
+
+    $stam->query = "INSERT INTO {$stam->boekregelstbl} ({$fields}) VALUES ({$values}) ";
+    if($stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__)) {
+      $this->grootboekSaldoBijwerken($obj->grootboekrekening,$obj->bedrag );
+      $msg['blue'][] = "Toegevoegd: boekregel({$lastid}) - {$obj->grootboekrekening} {$obj->bomschrijving} {$obj->bedrag}";
+      return($lastid);
+    }
+    else
+      return(false);
+
+  } // END FUNCTION opslaanBoekregel }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool updateBoekregel( int $boekregelid, obj $obj ) 
+  * @VARIABLES: 
+  *   - int $boekregelid: het id van de te updaten boekregel
+  *   - obj $obj: een object met variables en values. De variable-namen zijn de veldnamen
+  * @SYLLABUS: 
+  *   Update een boekregel.
+  *   Initieert tevens de bijkomde acties zoals een update grootboeksaldi
+  *
+  *****************************************************************{{{ */
+  function updateBoekregel($boekregelid,$obj) {
+    global $msg, $stam;
+
+    if(!$obj || !$boekregelid) return(false);
+
+    // Vraag eerst de originele boekregel op.
+    //
+    $oriobj = $stam->Get_object("SELECT * FROM {$stam->boekregelstbl} WHERE id={$boekregelid}",$this->file."::".__FUNCTION__."::".__LINE__);
+
+/*
+    printrc1($obj, "Het aangeboden object is: \n");
+Dummy Object
+(
+  [grootboekrekening] => 2300
+  [bedrag] => 735.00
+)
+
+    printrc1($oriobj, "Het opgevraagde object is: \n");
+stdClass Object
+(
+  [boekregelid] => 457
+  [journaalid] => 82
+  [boekjaar] => 2008
+  [datum] => 2008-12-31
+  [grootboekrekening] => 2300
+  [btwrelatie] => 0
+  [factuurrelatie] => 0
+  [relatie] => 
+  [nummer] => 
+  [boorsprong] => 5dregeling
+  [bomschrijving] => BTW 5d vermindering naar: 8900
+  [bedrag] => 735.00
+)
+
+*/
+    // Werk het saldo van de grootboekrekening bij met het originele bedrag en
+    // straks na de update met het nieuwe bedrag.
+    //
+    $this->grootboekSaldoBijwerken($oriobj->grootboekrekening,$oriobj->bedrag * -1);
+
+    // Maak gegevens klaar voor de update
+    // betrek alleen values die in het object worden aangeboden
+    //
+    $values = '';
+
+    foreach(get_object_vars($obj) AS $key=>$val) { 
+      switch($key) {
+        case 'boekregelid'       : $values .= ",\"boekregelid\"={$val}";  break;
+        case 'journaalid'        : $values .= ",\"journaalid\"={$val}";  break;
+        case 'boekjaar'          : $values .= ",\"boekjaar\"={$val}";  break;
+        case 'datum'             : $values .= ",\"datum\"='{$val}'";  break;
+        case 'grootboekrekening' : $values .= ",\"grootboekrekening\"={$val}";  break;
+        case 'btwrelatie'        : $values .= ",\"btwrelatie\"='{$val}'";  break;
+        case 'factuurrelatie'    : $values .= ",\"factuurrelatie\"='{$val}'";  break;
+        case 'relatie'           : $values .= ",\"relatie\"='{$val}'";  break;
+        case 'nummer'            : $values .= ",\"nummer\"='{$val}'";  break;
+        case 'boorsprong'        : $values .= ",\"oorsprong\"='{$val}'";  break;
+        case 'bomschrijving'     : $values .= ",\"bomschrijving\"='{$stam->Prepare($val)}'";  break;
+        case 'bedrag'            : $values .= ",\"bedrag\"='{$val}'";  break;
+      }
+    }
+
+    $stam->query = "UPDATE {$stam->boekregelstbl} SET ".substr($values,1)." WHERE \"boekregelid\"={$boekregelid}";
+    $stam->Do_sql($this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Werk het saldo bij van de vernieuwde boekregel
+    //
+    $this->grootboekSaldoBijwerken($obj->grootboekrekening,$obj->bedrag );
+    $msg['blue'][] = "Update: boekregel({boekregelid}) - {$obj->grootboekrekening} {$obj->bedrag}";
+    return(true);
+
+  } // END FUNCTION updateBoekregel }}}
+
+
+} // END CLASS Journaalpost extends Journaal}}}
+
+
+/* ********************** FUNCTIONS ****************************** */
+
+
+/* ****************************************************************
+* @FUNCTION:   reloadPost() 
+* @SYLLABUS: 
+*   Laadt een nieuwe journaalpost en verwijdert oude uit geheugen.
+*   Dit is b.v. nodig als een boekingsregel of journaalpost is veranderd of verwijderd.
+*   De functie wordt aangeroepen met de originele post of niets. In het eerste
+*   geval wordt de originele post herladen in het tweede geval een lege
+*   journaalpost. In beide gevallen wordt de journaalpost in een return
+*   teruggegeven.
+*   
+*****************************************************************{{{ */
+// Onderstaande aanroep wordt in php4 niet gepikt en we moeten dus een argument
+// meegeven, ook ingeval lege reset. Zet bij de aanroep dan post->journaalid = ''.
+//
+//function reloadPost(&$post='') {
+function reloadPost(&$post) {
+  if(!empty($post->journaalid)) {
+    $journaalid = $post->journaalid;
+    unset($post);
+    return(new Journaal($journaalid));
+  }
+  else 
+    return(new Journaal());
+} 
+
+/* __END__ */

@@ -1,0 +1,120 @@
+<?php // vim: syntax=php 
+
+
+Class Beginjaar {
+
+
+  /* ****************************************************************
+  * @METHOD:   __construct( ) 
+  * @SYLLABUS: 
+  *
+  *****************************************************************{{{ */
+  public function __construct() {
+
+    $this->file = basename(__FILE__);
+
+    $this->db = &$GLOBALS['stam'];
+
+    $this->grbstam = 'grootboekstam'.$this->db->lopendjaar['value'];
+    $this->grbstammin1 = 'grootboekstam'.($this->db->lopendjaar['value'] - 1);
+    $this->structdb = $GLOBALS['config']->data['dir']['struct'];
+
+    printrc2($this);
+
+  } // END METHOD __construct }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   bool maakGrootboekstam( ) 
+  * @METHOD: bool maakGrootboekstamInternal(  ) 
+  * @METHOD: bool maakGrootboekstamExternal(  ) 
+  * @SYLLABUS: 
+  *   Initieert het maken van een grootboekstam voor het nieuwe jaar
+  *   Initieert daarna het maken van de grootboeksaldirecords voor het nieuwe jaar
+  *
+  * Deze methods zijn geskipt. Wordt nu opgelost met historierecords in grootboekstam
+  *
+  *****************************************************************{{{ */
+
+
+  /* ****************************************************************
+  * @METHOD:   aanmakenSaldi() 
+  * @SYLLABUS: 
+  *   Geconsolideerde grootboeksaldi aanmaken en herstellen.
+  *   Door foute boekingen b.v. tijdens programmafouten kan het voorkomen dat
+  *   de grootboeksaldi uit synch raken. Met deze methode worden ze weer voor
+  *   het huidige boekjaar hersteld.
+  *   Tevens worden saldi-records gemaakt voor grootboekrekeningen DIE EEN
+  *   SALDO HEBBEN en waarvan nog geen saldo record bestaat, ergo als deze
+  *   method wordt gedraaid met een nieuw boekjaar worden voor alle
+  *   grootboekrekeningen uit grootboekstam saldi records gemaakt voor dat
+  *   nieuwe jaar.
+  *   DEZE METHODE KAN NIET van buitenaf opgeroepen worden maar als object.
+  *
+  *****************************************************************{{{ */
+  function aanmakenSaldi() {
+
+    // Sinds SQL versie 1.12.0 gebruiken we een view "vw_boekregelsaldi" voor dit method!
+    // De view geeft een opsomming van boekregelsaldi, saldosaldi, boekjaar en grootboekrekening
+    // van het huidige boekjaar. Als het saldosaldi IS NULL dan bestaat er voor die
+    // grootboekrekening nog geen saldorecord voor het huidige boekjaar. Maak die dan aan
+    //
+    //  Regelsaldo; Saldisaldo; boekjaar; grootboekrekening
+    //     -804.59;    -804.59;     2013;         8110
+    //    -1250.00;           ;     2013;         8190     // Heeft een Null value
+    //        0.34;       0.34;     2013;         8900
+
+    // First insert
+    //
+    $this->db->Do_query("INSERT INTO {$this->db->grootboeksaldi} (\"id\",\"boekjaar\",\"nummer\",\"saldo\") SELECT "
+                       ."(SELECT MAX(\"id\")+1 FROM {$this->db->grootboeksaldi}) As \"id\", vs.\"boekjaar\", \"grootboekrekening\", \"Regelsaldo\" "
+                       ."FROM \"vw_boekregelsaldi\" vs "
+                       ."WHERE \"Saldisaldo\" IS NULL ",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Then updates
+    //
+    $updatearr = array();
+    $this->db->Do_query("SELECT * FROM \"vw_boekregelsaldi\" "
+                       ."WHERE \"Regelsaldo\"<>\"Saldisaldo\" ",$this->file."::".__FUNCTION__."::".__LINE__);
+    while ($obj = $this->db->Do_object())
+      $updatearr[] = $obj;
+printrc2($updatearr, "updatearr");
+
+    foreach ($updatearr As $obj)
+      $this->db->Do_query("UPDATE {$this->db->grootboeksaldi} SET \"saldo\"={$obj->Regelsaldo} "
+                         ."WHERE \"nummer\"={$obj->grootboekrekening} AND \"boekjaar\"={$obj->boekjaar}",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    // Het kan voorkomen dat er een saldoregel is maar geen boekstukregels meer voor een rekening (hoort niet maar ingeval er direct in de tabellen geknoeid wordt)
+    // In dat geval moet de saldoregel verwijderd worden
+    $this->db->Do_query("DELETE FROM {$this->db->grootboeksaldi} WHERE \"boekjaar\"={$this->db->boekjaar} AND \"nummer\" NOT IN "
+                  ."(SELECT DISTINCT \"grootboekrekening\" FROM \"vw_boekregelsaldi\") ",$this->file."::".__FUNCTION__."::".__LINE__);
+
+    return(true);
+
+  } // END FUNCTION aanmakenSaldi }}}
+
+
+  /* ****************************************************************
+  * @METHOD:   getnieuwSaldo() 
+  * @SYLLABUS: 
+  *   Hulpfunctie om grootboeksaldi uit boekregels samen te stellen
+  *   Wordt alleen gebruikt vanuit aanmakenSaldi en herstellenSaldi
+  *
+  *****************************************************************{{{ */
+  function getnieuwSaldo($nummer) {
+
+    // haal op basis van het nummer de bedragen rekeningen uit boekregels
+    // die op dit nummer zijn geboekt
+    //
+    if(!$saldo = $this->db->Get_array_field('SUM("bedrag")',$this->db->boekregelstbl,"\"grootboekrekening\"={$nummer} AND \"boekjaar\"={$this->db->boekjaar}"
+                                            ,$this->file."::".__FUNCTION__."::".__LINE__))
+      $saldo = 0.00;
+
+    return(sprintf("%0.2f", $saldo));
+
+  } // END FUNCTION getnieuwSaldo }}}
+
+
+} // END CLASS Grootboek
+
+/* __END__ */

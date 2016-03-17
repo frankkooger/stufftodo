@@ -1,0 +1,206 @@
+<?php 
+
+/** 
+ * INI File reader/writer 
+ * Released under the GPL v2.0 
+ * Copyright (c) 2008 Tim Cameron Ryan 
+ * Verbeteringen: Frank Kooger 2010-11-09
+ *
+ * This class only works with sectioned ini files:
+ *
+ * [section]
+ * key = value
+ * ; comment
+ *
+ * [section2]
+ * arr[] = val1
+ * arr[] = val2
+ *
+ * Changing of a key:
+ * obj->setValue('section','key','value');
+ * obj->setValue['section2','arr',array('val1','val2'));
+ *
+ * parse_ini_file:
+ *
+5.3.0   Added optional scanner_mode parameter. Single quotes may now be used
+        around variable assignments. Hash marks (#) may no longer be used as comments
+        and will throw a deprecation warning if used.
+5.2.7   On syntax error this function will return FALSE rather then an empty
+        array.
+5.2.4   Keys and section names consisting of numbers are now evaluated as PHP
+        integers thus numbers starting by 0 are evaluated as octals and numbers
+        starting by 0x are evaluated as hexadecimals.
+5.0.0   Values enclosed in double quotes can contain new lines.
+4.2.1   This function is now affected by safe mode and open_basedir. 
+ *
+ */ 
+
+class INIFile 
+{ 
+    protected $data = array('' => array()); 
+
+    function __construct($path = null) 
+    { 
+        // load file 
+        if ($path) 
+            $this->load($path); 
+    } 
+     
+    public function load($path) { 
+        // parse file 
+        $this->data = parse_ini_file($path, true);
+    } 
+
+    public function save($path = '') 
+    { 
+        // save file or return output
+        if($path) 
+          return file_put_contents($path, $this->saveString()); 
+        else
+          return $this->saveString(); 
+    } 
+     
+    public function saveString() 
+    { 
+        // get sections list (beginning with globals) 
+        ksort($this->data); 
+        $sections = array_unique(array_merge(array(''), array_keys($this->data))); 
+         
+        // serialize sections 
+        $ini = array(); 
+        foreach ($sections as $section) { 
+          // there can be empty section
+          if(!isset($this->data[$section])) continue;
+
+            // write sections 
+            if ($section != '') 
+                $ini[] = '[' . $section . ']'; 
+                 
+            // serialize value array 
+            $ini = array_merge($ini, $this->serializeArray($this->data[$section])); 
+            $ini[] = ''; 
+        }     
+         
+        // write file 
+        return implode("\n", $ini); 
+        return implode("\r\n", $ini); 
+    } 
+     
+    protected function serializeArray($array, $prefix = '') 
+    { 
+        // serialize value array 
+        $ini = array(); 
+        ksort($array); 
+        foreach ($array as $key => $value) 
+        { 
+            // parse data types 
+            if ($value === true) 
+                $value = 'true'; 
+            else if ($value === false) 
+                $value = 'false'; 
+            else if (is_numeric($value)) 
+                $value = $value; 
+            else if (is_string($value)) 
+                $value = '"' . addslashes($value) . '"'; 
+                 
+            // serialize value 
+            if (!is_array($value) && !is_numeric($key)) 
+                $ini[] = ($prefix ? $prefix . '.' : '') . $key . ' = ' . $value; 
+            else if (!is_array($value)) 
+                $ini[] = $prefix . '[] = ' . $value; 
+            else 
+                $ini = array_merge($ini, $this->serializeArray($value, ($prefix ? $prefix . '.' : '') . $key)); 
+        } 
+        return $ini; 
+    } 
+     
+    protected function &parseVariableName(&$name, $section = '', $create = false) 
+    { 
+        // parse name 
+        $levels = explode('.', $name); 
+
+        // check array 
+        if (substr($name, -2, 2) == '[]') {
+            $name = '[]'; 
+        }
+        else 
+            $name = array_pop($levels); 
+
+        // climb section heirarchy 
+        $section =& $this->data[$section]; 
+        foreach ($levels as $level) 
+        { 
+            if (!is_array($section[$level]) && !$create) 
+                return false; 
+            else if (!is_array($section[$level])) 
+                $section[$level] = array(); 
+            $section =& $section[$level]; 
+        } 
+         
+        // get array key 
+        if ($name == '[]') 
+          $name = count($section); 
+
+        // return section 
+        return $section; 
+    } 
+     
+    //---------------------------------------------------------------------- 
+    // data accessors 
+    //---------------------------------------------------------------------- 
+     
+    public function getValue($section = '', $name, $parseConstants = true) 
+    { 
+        // return value (and parse constants) 
+        $section =& $this->parseVariableName($name, $section, false); 
+        return (!$section ? null : 
+            ((!$parseConstants || !is_string($section[$name])) ? $section[$name] : 
+            preg_replace('/\{([^}]+)\}/e', "constant('\\1')", $section[$name]))); 
+    } 
+     
+    //---------------------------------------------------------------------- 
+    // $value may be an array in wich case an array is set
+    //---------------------------------------------------------------------- 
+    public function setValue($section = '', $name, $value) 
+    { 
+        // add new entry 
+        $section =& $this->parseVariableName($name, $section, true); 
+        return $section[$name] = $value; 
+    } 
+     
+    public function deleteValue($section = '', $name) 
+    { 
+        // delete entry 
+        if ($section =& $this->parseVariableName($name, $section, false)) 
+            unset($section[$name]); 
+    } 
+     
+    public function getSection($section = '') 
+    { 
+//[TODO] parse all constants? 
+        // return the section 
+        return $this->data[$section]; 
+    } 
+     
+    public function setSection($section = '', $value) 
+    { 
+        // set the section 
+        return $this->data[$section] = $value; 
+    } 
+     
+    public function deleteSection($section = '') 
+    { 
+        // delete the section 
+        unset($this->data[$section]); 
+    } 
+     
+    function __get($name) 
+    { 
+        switch ($name) 
+        { 
+            case 'data': return $this->data; 
+        } 
+    } 
+} 
+
+/* __END__ */
